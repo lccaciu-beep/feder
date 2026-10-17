@@ -142,6 +142,19 @@ async function decode(blob: Blob): Promise<ImageBitmap | HTMLImageElement> {
   }
 }
 
+// ---------- Audio-Wiedergabe ----------
+
+/** Während der Wiedergabe: Elemente, die nach diesem Zeitpunkt entstanden sind, blass zeichnen. */
+let playbackCutoff: number | null = null;
+
+export function setPlaybackCutoff(t: number | null): void {
+  playbackCutoff = t;
+}
+
+export function itemTime(it: Item): number {
+  return it.type === 'stroke' ? it.t0 : it.createdAt;
+}
+
 // ---------- Zeichnen ----------
 
 function withRotation(ctx: Ctx, box: Rect, rotation: number, draw: () => void) {
@@ -314,6 +327,17 @@ function drawLink(ctx: Ctx, it: Item & { type: 'link' }) {
 }
 
 export function drawItem(ctx: Ctx, it: Item): void {
+  if (playbackCutoff !== null && it.type !== 'link' && itemTime(it) > playbackCutoff) {
+    ctx.save();
+    ctx.globalAlpha = 0.16;
+    drawItemInner(ctx, it);
+    ctx.restore();
+    return;
+  }
+  drawItemInner(ctx, it);
+}
+
+function drawItemInner(ctx: Ctx, it: Item): void {
   switch (it.type) {
     case 'stroke':
       drawStroke(ctx, it);
@@ -339,7 +363,7 @@ export function drawItem(ctx: Ctx, it: Item): void {
 /** Zeichnet Inhalte in der richtigen Reihenfolge: Textmarker zuerst, darüber alles andere. */
 export function drawItems(ctx: Ctx, items: readonly Item[], filter?: (it: Item) => boolean): void {
   for (const it of items) {
-    if (it.type === 'stroke' && it.tool === 'highlighter' && (!filter || filter(it))) drawStroke(ctx, it);
+    if (it.type === 'stroke' && it.tool === 'highlighter' && (!filter || filter(it))) drawItem(ctx, it);
   }
   for (const it of items) {
     if (filter && !filter(it)) continue;

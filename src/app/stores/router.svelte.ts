@@ -2,7 +2,7 @@
 
 export type Route =
   | { name: 'library'; section: 'docs'; folderId: string | null }
-  | { name: 'library'; section: 'recent' | 'favorites' | 'trash' }
+  | { name: 'library'; section: 'recent' | 'favorites' | 'trash' | 'study' }
   | { name: 'notebook'; id: string; page?: number; pageId?: string };
 
 export function parse(hash: string): Route {
@@ -13,6 +13,7 @@ export function parse(hash: string): Route {
     case 'recent':
     case 'favorites':
     case 'trash':
+    case 'study':
       return { name: 'library', section: parts[0] };
     case 'nb':
       if (parts[1]) {

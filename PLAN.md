@@ -1,6 +1,6 @@
 # Feder – Umsetzungsplan
 
-Stand: 17.10.2026 · Status: **Phasen 1–4 abgeschlossen**
+Stand: 17.10.2026 · Status: **Phasen 1–5 abgeschlossen**
 
 > Bestätigt am 17.10.2026: E1 Svelte 5 · E2 alle Pakete aus §9 · E3 mkcert ·
 > E4 öffentliches Repo `feder` mit GitHub Pages. E5–E7 gelten als Empfehlung, solange du nicht widersprichst.
@@ -465,12 +465,13 @@ iPad-Prüfliste an dich.
 - [x] **Bericht Handschrifterkennung** → [docs/handschrifterkennung.md](docs/handschrifterkennung.md) – **Entscheidung offen**
 - [x] Tests: Suche (Phrase, Wortanfang, Umlaute), Index für Textfelder inkl. Undo; E2E: Notizbuchsuche, Bibliothekssuche, Lesezeichen, Link
 
-### Phase 5 – Erweiterungen
-- [ ] Audio: Aufnahme (MediaRecorder, `audio/mp4`), Striche mit `t0`, synchrones Hervorheben bei Wiedergabe, Strich antippen → Sprung
-- [ ] Whiteboard: unendliche Leinwand mit Kachel-Virtualisierung
-- [ ] Tabs für mehrere offene Notizbücher, Lesemodus
-- [ ] Lernkarten aus Lasso-Auswahl, Lernmodus (Leitner, 5 Boxen)
-- [ ] Tests: Audio-Zeitzuordnung, Leitner-Logik, Whiteboard-Koordinaten
+### Phase 5 – Erweiterungen ✅
+- [x] Audio: Aufnahme (MediaRecorder, bevorzugt `audio/mp4`), Striche tragen ihre Zeit; bei der Wiedergabe erscheinen Inhalte im Takt der Aufnahme, Antippen eines Strichs springt dorthin; Aufnahmen löschen
+- [x] Whiteboard: große Fläche (4000 × 3000 pt), wächst beim Schreiben am rechten/unteren Rand, weiter Zoombereich
+- [x] Tabs für bis zu 8 geöffnete Notizbücher (pro Gerät gemerkt)
+- [x] Lesemodus: Stift und Finger blättern/zoomen nur, Tippen öffnet Links und Tapes
+- [x] Lernkarten aus Lasso-Auswahl (Vorderseite = Bild, Rückseite = Text/Scribble), Stapel pro Notizbuch, Lernmodus (Leitner, 5 Fächer), Karten/Stapel verwalten
+- [x] Tests: Leitner-Logik, Audio-Zuordnung; E2E: Lesemodus, Whiteboard-Wachstum, Tabs, Lernkarte
 
 ### Phase 6 – Feinschliff
 - [ ] Einstellungen komplett (Eingabe, Druckmodus, Gesten, Darstellung, Speicher, Backup)

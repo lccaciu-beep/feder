@@ -14,6 +14,10 @@
   import ScanDialog from '../components/ScanDialog.svelte';
   import SearchPanel from './SearchPanel.svelte';
   import LinkDialog from './LinkDialog.svelte';
+  import AudioPanel from './AudioPanel.svelte';
+  import FlashcardDialog from './FlashcardDialog.svelte';
+  import { blobToDataUrl } from '../../storage/elements';
+  import { AudioRecorder, formatDuration, recordingSupported } from '../../audio/recorder';
   import { liveQuery } from 'dexie';
   import { toggleBookmark } from '../../storage/structure';
   import { ui } from '../stores/ui.svelte';
@@ -70,6 +74,41 @@
   let searchOpen = $state(false);
   let searchInitial = $state('');
   let linkOpen = $state(false);
+  let audioOpen = $state(false);
+  let flashcard = $state<{ front: string; pageId: Id | null } | null>(null);
+
+  async function makeFlashcard() {
+    if (!editor) return;
+    const pageId = editor.selection?.pageId ?? null;
+    const png = await editor.selectionImage(2);
+    if (!png) return;
+    flashcard = { front: await blobToDataUrl(png), pageId };
+  }
+  const recorder = new AudioRecorder();
+  let recording = $state(false);
+  let recElapsed = $state(0);
+  let recTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function toggleRecording() {
+    if (!doc) return;
+    if (recording) {
+      if (recTimer) clearInterval(recTimer);
+      recording = false;
+      const clip = await recorder.stop(doc.id);
+      if (clip) toasts.show(`Aufnahme gespeichert (${formatDuration(clip.duration)})`);
+      return;
+    }
+    try {
+      await recorder.start();
+      recording = true;
+      recElapsed = 0;
+      recTimer = setInterval(() => (recElapsed = Date.now() - recorder.startedAt), 500);
+    } catch (err) {
+      toasts.show(`Aufnahme nicht möglich: ${err instanceof Error ? err.message : String(err)}`, {
+        ms: 6000,
+      });
+    }
+  }
   const bookmarksQ = liveQuery(() => getDb().bookmarks.where('notebookId').equals(id).toArray());
   const currentPageId = $derived(doc && st ? (pageIds[st.pageIndex] ?? null) : null);
   const isBookmarked = $derived(
@@ -112,6 +151,7 @@
           initialPage: initialPageId ? Math.max(0, d.indexOf(initialPageId)) : (initialPage ?? 0),
         });
         editor = ed;
+        ui.openTab(d.id, d.notebook.title);
         if (ui.pendingSearch) {
           searchInitial = ui.pendingSearch;
           ui.pendingSearch = null;
@@ -166,6 +206,8 @@
     })();
     return () => {
       disposed = true;
+      if (recording && doc) void recorder.stop(doc.id);
+      if (recTimer) clearInterval(recTimer);
       for (const c of cleanups) c();
       editor?.finishTextEdit();
       editor?.destroy();
@@ -284,6 +326,12 @@
       x: r.right - 240,
       y: r.bottom + 6,
       items: [
+        {
+          label: st?.readMode ? 'Lesemodus beenden' : 'Lesemodus',
+          icon: 'notebook',
+          run: () => editor?.setReadMode(!st?.readMode),
+        },
+        { label: 'Aufnahmen anhören …', icon: 'headphones', run: () => (audioOpen = true) },
         { label: 'Exportieren …', icon: 'share', run: () => (showExport = true) },
         { label: 'PDF einfügen …', icon: 'page-plus', run: () => pdfInput?.click() },
         { label: 'Dokument scannen …', icon: 'image', run: () => (scanOpen = true) },
@@ -449,6 +497,36 @@
   <div class="canvas-host" bind:this={host}></div>
 
   <div class="bars" bind:this={barEl}>
+    {#if ui.tabs.length > 1}
+      <div class="tabbar" role="tablist" aria-label="Geöffnete Notizbücher">
+        {#each ui.tabs as t (t.id)}
+          <div class="tab" class:on={t.id === id}>
+            <button
+              role="tab"
+              aria-selected={t.id === id}
+              onclick={() => {
+                if (t.id === id) return;
+                editor?.finishTextEdit();
+                void doc?.autosave.flush();
+                router.go({ name: 'notebook', id: t.id });
+              }}>{t.title}</button
+            >
+            <button
+              class="x"
+              aria-label="Tab {t.title} schließen"
+              onclick={() => {
+                ui.closeTab(t.id);
+                if (t.id === id) {
+                  const next = ui.tabs[ui.tabs.length - 1];
+                  if (next) router.go({ name: 'notebook', id: next.id });
+                  else back();
+                }
+              }}><Icon name="close" size={14} /></button
+            >
+          </div>
+        {/each}
+      </div>
+    {/if}
     <div class="bar">
       <div class="left">
         <button class="icon-btn" onclick={back} aria-label="Zur Bibliothek"><Icon name="back" /></button>
@@ -462,58 +540,77 @@
         <span class="title" {title}>{title}</span>
       </div>
 
-      <div class="center" role="toolbar" aria-label="Werkzeuge">
-        {#each tools as t (t.id)}
-          <button
-            class="tool"
-            class:on={st?.tool === t.id}
-            onclick={() => setTool(t.id)}
-            aria-label="{t.label} ({t.key})"
-            aria-pressed={st?.tool === t.id}
+      {#if st?.readMode}
+        <div class="center read">
+          <span>Lesemodus</span>
+          <button class="btn" onclick={() => editor?.setReadMode(false)}>Bearbeiten</button>
+        </div>
+      {:else}
+        <div class="center" role="toolbar" aria-label="Werkzeuge">
+          {#each tools as t (t.id)}
+            <button
+              class="tool"
+              class:on={st?.tool === t.id}
+              onclick={() => setTool(t.id)}
+              aria-label="{t.label} ({t.key})"
+              aria-pressed={st?.tool === t.id}
+            >
+              <Icon name={t.icon()} />
+              {#if t.ink}
+                <span class="ink" style:background={t.ink()}></span>
+              {/if}
+            </button>
+          {/each}
+          <span class="sep"></span>
+          <button class="icon-btn" onclick={() => imageInput?.click()} aria-label="Bild einfügen"
+            ><Icon name="image" /></button
           >
-            <Icon name={t.icon()} />
-            {#if t.ink}
-              <span class="ink" style:background={t.ink()}></span>
-            {/if}
-          </button>
-        {/each}
-        <span class="sep"></span>
-        <button class="icon-btn" onclick={() => imageInput?.click()} aria-label="Bild einfügen"
-          ><Icon name="image" /></button
-        >
-        <button
-          class="icon-btn"
-          class:on={!!elementsAt}
-          onclick={(e) => {
-            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            elementsAt = elementsAt ? null : { x: r.left - 140, y: r.bottom + 8 };
-          }}
-          aria-label="Elemente"><Icon name="sticker" /></button
-        >
-        <button
-          class="icon-btn"
-          class:on={!!zoomWin}
-          onclick={toggleZoomWindow}
-          aria-label="Zoom-Fenster"
-          aria-pressed={!!zoomWin}><Icon name="magnifier" /></button
-        >
-        <span class="sep"></span>
-        <button
-          class="icon-btn"
-          disabled={!st?.canUndo}
-          onclick={() => editor?.undo()}
-          aria-label="Rückgängig (⌘Z)"><Icon name="undo" /></button
-        >
-        <button
-          class="icon-btn"
-          disabled={!st?.canRedo}
-          onclick={() => editor?.redo()}
-          aria-label="Wiederholen (⇧⌘Z)"><Icon name="redo" /></button
-        >
-      </div>
+          <button
+            class="icon-btn"
+            class:on={!!elementsAt}
+            onclick={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              elementsAt = elementsAt ? null : { x: r.left - 140, y: r.bottom + 8 };
+            }}
+            aria-label="Elemente"><Icon name="sticker" /></button
+          >
+          <button
+            class="icon-btn"
+            class:on={!!zoomWin}
+            onclick={toggleZoomWindow}
+            aria-label="Zoom-Fenster"
+            aria-pressed={!!zoomWin}><Icon name="magnifier" /></button
+          >
+          <span class="sep"></span>
+          <button
+            class="icon-btn"
+            disabled={!st?.canUndo}
+            onclick={() => editor?.undo()}
+            aria-label="Rückgängig (⌘Z)"><Icon name="undo" /></button
+          >
+          <button
+            class="icon-btn"
+            disabled={!st?.canRedo}
+            onclick={() => editor?.redo()}
+            aria-label="Wiederholen (⇧⌘Z)"><Icon name="redo" /></button
+          >
+        </div>
+      {/if}
 
       <div class="right">
         <span class="save" class:err={st?.saveStatus === 'error'} aria-live="polite">{saveLabel}</span>
+        {#if recordingSupported()}
+          <button
+            class="icon-btn rec"
+            class:recording
+            onclick={() => void toggleRecording()}
+            aria-label={recording ? 'Aufnahme beenden' : 'Audio aufnehmen'}
+            aria-pressed={recording}
+            ><Icon name={recording ? 'stop' : 'mic'} />{#if recording}<span class="rec-time"
+                >{formatDuration(recElapsed)}</span
+              >{/if}</button
+          >
+        {/if}
         <button
           class="icon-btn"
           class:on={searchOpen}
@@ -535,7 +632,7 @@
         >
       </div>
     </div>
-    {#if st}
+    {#if st && !st.readMode}
       <div class="sub">
         <ToolOptions tool={st.tool} {editor} />
       </div>
@@ -550,6 +647,7 @@
       onshareimage={() => void shareSelectionImage()}
       oncrop={() => (cropItem = selection?.single?.type === 'image' ? selection.single : null)}
       onlink={() => (linkOpen = true)}
+      onflashcard={() => void makeFlashcard()}
     />
   {/if}
 
@@ -650,6 +748,20 @@
   />
 {/if}
 
+{#if flashcard && doc}
+  <FlashcardDialog
+    front={flashcard.front}
+    notebookId={doc.id}
+    notebookTitle={doc.notebook.title}
+    pageId={flashcard.pageId}
+    onclose={() => (flashcard = null)}
+  />
+{/if}
+
+{#if audioOpen && doc && editor}
+  <AudioPanel {editor} notebookId={doc.id} onclose={() => (audioOpen = false)} />
+{/if}
+
 {#if searchOpen && doc && editor}
   <SearchPanel {doc} {editor} initial={searchInitial} onclose={() => (searchOpen = false)} />
 {/if}
@@ -715,7 +827,8 @@
     z-index: 10;
   }
   .bar,
-  .sub {
+  .sub,
+  .tabbar {
     pointer-events: auto;
   }
   .bar {
@@ -730,6 +843,48 @@
     -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);
     box-shadow: var(--shadow-lift);
+  }
+  .tabbar {
+    display: flex;
+    gap: 4px;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    max-width: 220px;
+    border-radius: 10px;
+    background: var(--bar);
+    box-shadow: var(--shadow-lift);
+    font: 500 13px var(--font-ui);
+    color: var(--muted);
+    flex: none;
+  }
+  .tab.on {
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .tab button[role='tab'] {
+    padding: 6px 4px 6px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tab .x {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    margin-right: 4px;
+    border-radius: 8px;
+  }
+  .center.read {
+    gap: 12px;
+    font: 600 14px var(--font-ui);
+    color: var(--muted);
   }
   .left,
   .right,
@@ -798,6 +953,18 @@
   .right .icon-btn.on {
     background: var(--accent-soft);
     color: var(--accent);
+  }
+  .rec.recording {
+    width: auto;
+    padding: 0 10px;
+    gap: 6px;
+    display: inline-flex;
+    color: #fff;
+    background: #d63031;
+  }
+  .rec-time {
+    font: 600 13px var(--font-ui);
+    font-variant-numeric: tabular-nums;
   }
   .bookmark.marked {
     color: #c0392b;

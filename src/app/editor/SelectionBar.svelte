@@ -11,6 +11,7 @@
     onshareimage,
     oncrop,
     onlink,
+    onflashcard,
   }: {
     editor: Editor;
     info: SelectionInfo;
@@ -18,6 +19,7 @@
     onshareimage: () => void;
     oncrop: () => void;
     onlink: () => void;
+    onflashcard: () => void;
   } = $props();
 
   let colors = $state(false);
@@ -39,6 +41,7 @@
       { label: 'Als Bild teilen …', icon: 'share', run: onshareimage },
       { label: 'Als Element speichern …', icon: 'sticker', run: onsaveelement },
       { label: 'Link hinzufügen …', icon: 'link', run: onlink },
+      { label: 'Lernkarte erstellen …', icon: 'flashcard', run: onflashcard },
     ];
     const single = info.single;
     if (single?.type === 'image') {

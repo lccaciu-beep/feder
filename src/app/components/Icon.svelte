@@ -84,6 +84,12 @@
     outline: '<path d="M5 6h14M8 10h11M8 14h11M5 18h14"/>',
     indent: '<path d="M4 6h16M10 10h10M10 14h10M4 18h16M4 9.5l3 2.5-3 2.5"/>',
     outdent: '<path d="M4 6h16M10 10h10M10 14h10M4 18h16M7 9.5L4 12l3 2.5"/>',
+    mic: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21M8.5 21h7"/>',
+    play: '<path fill="currentColor" stroke="none" d="M8 5.5v13l11-6.5z"/>',
+    pause: '<path fill="currentColor" stroke="none" d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/>',
+    stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor" stroke="none"/>',
+    headphones:
+      '<path d="M4 15v-3a8 8 0 0116 0v3"/><rect x="3.5" y="14" width="4" height="6.5" rx="1.5"/><rect x="16.5" y="14" width="4" height="6.5" rx="1.5"/>',
     share:
       '<path d="M12 15V3.5M8 7.5l4-4 4 4"/><path d="M7.5 11H6a2 2 0 00-2 2v6a2 2 0 002 2h12a2 2 0 002-2v-6a2 2 0 00-2-2h-1.5"/>',
     download: '<path d="M12 4v11.5M8 11.5l4 4 4-4"/><path d="M5 20h14"/>',

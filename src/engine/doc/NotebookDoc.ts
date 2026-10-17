@@ -156,10 +156,10 @@ export class NotebookDoc {
 
   // ---------- Befehle ----------
 
-  execute(cmd: Command): void {
+  execute(cmd: Command, opts: { history?: boolean } = {}): void {
     if (isEmpty(cmd)) return;
     this.apply(cmd);
-    this.history.push(cmd);
+    if (opts.history !== false) this.history.push(cmd);
   }
 
   undo(): boolean {

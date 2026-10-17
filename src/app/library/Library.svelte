@@ -5,6 +5,7 @@
   import PromptDialog from '../components/PromptDialog.svelte';
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
   import NotebookCover from './NotebookCover.svelte';
+  import StudyView from './StudyView.svelte';
   import NewNotebookDialog from './NewNotebookDialog.svelte';
   import MoveDialog from './MoveDialog.svelte';
   import CoverDialog from './CoverDialog.svelte';
@@ -187,6 +188,8 @@
             (n) => n.title,
           ),
         };
+      case 'study':
+        return { folders: [], notebooks: [] };
       case 'trash':
         return {
           folders: folders.filter((f) => f.deletedAt).sort((a, b) => b.deletedAt! - a.deletedAt!),
@@ -200,11 +203,13 @@
       ? 'Suche'
       : section === 'docs'
         ? (path.at(-1)?.name ?? 'Dokumente')
-        : section === 'recent'
-          ? 'Zuletzt geöffnet'
-          : section === 'favorites'
-            ? 'Favoriten'
-            : 'Papierkorb',
+        : section === 'study'
+          ? 'Lernkarten'
+          : section === 'recent'
+            ? 'Zuletzt geöffnet'
+            : section === 'favorites'
+              ? 'Favoriten'
+              : 'Papierkorb',
   );
 
   function countIn(f: Folder): number {
@@ -546,6 +551,7 @@
     { id: 'docs', label: 'Dokumente', icon: 'notebook' },
     { id: 'recent', label: 'Zuletzt', icon: 'clock' },
     { id: 'favorites', label: 'Favoriten', icon: 'star' },
+    { id: 'study', label: 'Lernen', icon: 'flashcard' },
     { id: 'trash', label: 'Papierkorb', icon: 'trash' },
   ];
 
@@ -648,104 +654,114 @@
   </header>
 
   <main class="content" class:list={listMode}>
-    {#if query.trim().length >= 2 && hitGroups.length}
-      <section class="hits" aria-label="Treffer in Inhalten">
-        <h2>In Inhalten</h2>
-        {#each hitGroups as g (g.notebookId)}
-          <div class="hit-group">
-            <h3>{g.title}</h3>
-            {#each g.hits.slice(0, 8) as h, i (i)}
-              <button class="hit" onclick={() => openHit(h)}>
-                <span class="where">Seite {h.pageIndex + 1}, {hitLabel(h.kind)}</span>
-                <span class="snip">{h.snippet}</span>
-              </button>
-            {/each}
-            {#if g.hits.length > 8}<p class="more-hits">und {g.hits.length - 8} weitere</p>{/if}
-          </div>
-        {/each}
-      </section>
-    {/if}
-    {#if isEmpty && !(query.trim().length >= 2 && hitGroups.length)}
-      <div class="empty">
-        {#if query}
-          <p>Nichts gefunden für „{query}“.</p>
-        {:else if section === 'docs'}
-          <p>{folderId ? 'Dieser Ordner ist leer.' : 'Noch keine Notizbücher. Leg dein erstes an.'}</p>
-          <button class="btn primary" onclick={() => (dialog = { kind: 'new-notebook' })}
-            >Neues Notizbuch</button
-          >
-        {:else if section === 'recent'}
-          <p>Hier erscheinen Notizbücher, sobald du sie öffnest.</p>
-        {:else if section === 'favorites'}
-          <p>Markiere Notizbücher mit dem Stern, um sie hier zu sammeln.</p>
-        {:else}
-          <p>Der Papierkorb ist leer.</p>
-        {/if}
-      </div>
+    {#if section === 'study' && !query}
+      <StudyView />
     {:else}
-      <div class="grid">
-        {#each view.folders as f (f.id)}
-          {@const k = key('f', f.id)}
-          <div
-            class="tile folder-tile"
-            class:sel={selected.has(k)}
-            class:drop={drag?.target === f.id}
-            data-drop={section === 'trash' ? undefined : f.id}
-            role="button"
-            tabindex="0"
-            aria-label="Ordner {f.name}"
-            use:press={{
-              tap: (x, y) =>
-                selecting ? toggle('f', f.id) : section === 'trash' ? folderMenu(f, x, y) : openFolder(f),
-              menu: (x, y) => folderMenu(f, x, y),
-              drag: section === 'trash' ? undefined : (e) => startDrag(dragSelection('f', f.id), f.name, e),
-            }}
-          >
-            <div class="folder-shape" aria-hidden="true">
-              <Icon name="folder" size={listMode ? 28 : 56} />
+      {#if query.trim().length >= 2 && hitGroups.length}
+        <section class="hits" aria-label="Treffer in Inhalten">
+          <h2>In Inhalten</h2>
+          {#each hitGroups as g (g.notebookId)}
+            <div class="hit-group">
+              <h3>{g.title}</h3>
+              {#each g.hits.slice(0, 8) as h, i (i)}
+                <button class="hit" onclick={() => openHit(h)}>
+                  <span class="where">Seite {h.pageIndex + 1}, {hitLabel(h.kind)}</span>
+                  <span class="snip">{h.snippet}</span>
+                </button>
+              {/each}
+              {#if g.hits.length > 8}<p class="more-hits">und {g.hits.length - 8} weitere</p>{/if}
             </div>
-            <div class="meta">
-              <span class="name">{f.name}</span>
-              <span class="sub">{countIn(f)} {countIn(f) === 1 ? 'Element' : 'Elemente'}</span>
+          {/each}
+        </section>
+      {/if}
+      {#if isEmpty && !(query.trim().length >= 2 && hitGroups.length)}
+        <div class="empty">
+          {#if query}
+            <p>Nichts gefunden für „{query}“.</p>
+          {:else if section === 'docs'}
+            <p>{folderId ? 'Dieser Ordner ist leer.' : 'Noch keine Notizbücher. Leg dein erstes an.'}</p>
+            <button class="btn primary" onclick={() => (dialog = { kind: 'new-notebook' })}
+              >Neues Notizbuch</button
+            >
+          {:else if section === 'recent'}
+            <p>Hier erscheinen Notizbücher, sobald du sie öffnest.</p>
+          {:else if section === 'favorites'}
+            <p>Markiere Notizbücher mit dem Stern, um sie hier zu sammeln.</p>
+          {:else}
+            <p>Der Papierkorb ist leer.</p>
+          {/if}
+        </div>
+      {:else}
+        <div class="grid">
+          {#each view.folders as f (f.id)}
+            {@const k = key('f', f.id)}
+            <div
+              class="tile folder-tile"
+              class:sel={selected.has(k)}
+              class:drop={drag?.target === f.id}
+              data-drop={section === 'trash' ? undefined : f.id}
+              role="button"
+              tabindex="0"
+              aria-label="Ordner {f.name}"
+              use:press={{
+                tap: (x, y) =>
+                  selecting ? toggle('f', f.id) : section === 'trash' ? folderMenu(f, x, y) : openFolder(f),
+                menu: (x, y) => folderMenu(f, x, y),
+                drag: section === 'trash' ? undefined : (e) => startDrag(dragSelection('f', f.id), f.name, e),
+              }}
+            >
+              <div class="folder-shape" aria-hidden="true">
+                <Icon name="folder" size={listMode ? 28 : 56} />
+              </div>
+              <div class="meta">
+                <span class="name">{f.name}</span>
+                <span class="sub">{countIn(f)} {countIn(f) === 1 ? 'Element' : 'Elemente'}</span>
+              </div>
+              {#if selecting}<span class="check" class:on={selected.has(k)}
+                  ><Icon name="check" size={16} /></span
+                >{/if}
             </div>
-            {#if selecting}<span class="check" class:on={selected.has(k)}
-                ><Icon name="check" size={16} /></span
-              >{/if}
-          </div>
-        {/each}
-        {#each view.notebooks as n (n.id)}
-          {@const k = key('n', n.id)}
-          <div
-            class="tile nb-tile"
-            class:sel={selected.has(k)}
-            role="button"
-            tabindex="0"
-            aria-label="Notizbuch {n.title}"
-            use:press={{
-              tap: (x, y) =>
-                selecting ? toggle('n', n.id) : section === 'trash' ? notebookMenu(n, x, y) : openNotebook(n),
-              menu: (x, y) => notebookMenu(n, x, y),
-              drag: section === 'trash' ? undefined : (e) => startDrag(dragSelection('n', n.id), n.title, e),
-            }}
-          >
-            <NotebookCover title={n.title} cover={n.cover} width={listMode ? 40 : 148} />
-            <div class="meta">
-              <span class="name">
-                {#if n.favorite}<span class="fav"><Icon name="star-filled" size={14} label="Favorit" /></span
-                  >{/if}
-                {n.title}
-              </span>
-              <span class="sub">
-                {section === 'trash' ? `gelöscht ${fmtDate(n.deletedAt!)}` : fmtDate(n.updatedAt)}
-                {#if listMode}, {n.pageIds.length} {n.pageIds.length === 1 ? 'Seite' : 'Seiten'}{/if}
-              </span>
+          {/each}
+          {#each view.notebooks as n (n.id)}
+            {@const k = key('n', n.id)}
+            <div
+              class="tile nb-tile"
+              class:sel={selected.has(k)}
+              role="button"
+              tabindex="0"
+              aria-label="Notizbuch {n.title}"
+              use:press={{
+                tap: (x, y) =>
+                  selecting
+                    ? toggle('n', n.id)
+                    : section === 'trash'
+                      ? notebookMenu(n, x, y)
+                      : openNotebook(n),
+                menu: (x, y) => notebookMenu(n, x, y),
+                drag:
+                  section === 'trash' ? undefined : (e) => startDrag(dragSelection('n', n.id), n.title, e),
+              }}
+            >
+              <NotebookCover title={n.title} cover={n.cover} width={listMode ? 40 : 148} />
+              <div class="meta">
+                <span class="name">
+                  {#if n.favorite}<span class="fav"
+                      ><Icon name="star-filled" size={14} label="Favorit" /></span
+                    >{/if}
+                  {n.title}
+                </span>
+                <span class="sub">
+                  {section === 'trash' ? `gelöscht ${fmtDate(n.deletedAt!)}` : fmtDate(n.updatedAt)}
+                  {#if listMode}, {n.pageIds.length} {n.pageIds.length === 1 ? 'Seite' : 'Seiten'}{/if}
+                </span>
+              </div>
+              {#if selecting}<span class="check" class:on={selected.has(k)}
+                  ><Icon name="check" size={16} /></span
+                >{/if}
             </div>
-            {#if selecting}<span class="check" class:on={selected.has(k)}
-                ><Icon name="check" size={16} /></span
-              >{/if}
-          </div>
-        {/each}
-      </div>
+          {/each}
+        </div>
+      {/if}
     {/if}
   </main>
 

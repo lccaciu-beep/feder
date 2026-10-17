@@ -72,9 +72,12 @@ export class Camera implements CameraState {
   insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
   fitScale = 1;
   dir: ScrollDirection = 'vertical';
+  /** Whiteboard: große Fläche, Zoom unabhängig von der Seitenbreite */
+  whiteboard = false;
   private layout: Layout = { boxes: [], width: 0, height: 0, maxPageW: 1, maxPageH: 1 };
 
   get minScale(): number {
+    if (this.whiteboard) return this.fitScale * 0.12;
     return this.fitScale * (this.dir === 'vertical' ? 0.5 : 0.8);
   }
 
@@ -105,7 +108,9 @@ export class Camera implements CameraState {
     const availH = this.vh - this.insets.top - this.insets.bottom - 2 * MARGIN;
     const byW = availW / Math.max(1, this.layout.maxPageW);
     const byH = availH / Math.max(1, this.layout.maxPageH);
-    this.fitScale = Math.max(0.05, this.dir === 'vertical' ? byW : Math.min(byW, byH));
+    this.fitScale = this.whiteboard
+      ? Math.max(0.05, availW / 1100)
+      : Math.max(0.05, this.dir === 'vertical' ? byW : Math.min(byW, byH));
   }
 
   snapshot(): CameraState {

@@ -185,14 +185,16 @@ export function applyInkStyle(ctx: Ctx, s: StrokeItem): void {
 
 export function drawStroke(ctx: Ctx, s: StrokeItem): void {
   const path = strokePath(s);
+  const alpha = ctx.globalAlpha;
   applyInkStyle(ctx, s);
+  ctx.globalAlpha = s.opacity * alpha;
   if (s.dash !== 'solid') {
     ctx.stroke(path);
     ctx.setLineDash([]);
   } else {
     ctx.fill(path);
   }
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = alpha;
 }
 
 export function isHighlighter(it: Item): boolean {

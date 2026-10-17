@@ -34,8 +34,15 @@ import { TapeTool, toggleTapeAt } from './tools/TapeTool';
 import { TextTool, tapText } from './tools/TextTool';
 import { fitText } from './tools/factory';
 import type { SelectionHandle, SelectionState, Sample, Tool, ToolHost } from './tools/types';
-import { itemBBox, itemInPolygon, transformItem, translate, type Sim } from './geometry/transform';
-import { drawItems, onImageLoaded } from './render/items';
+import {
+  itemBBox,
+  itemHitPoint,
+  itemInPolygon,
+  transformItem,
+  translate,
+  type Sim,
+} from './geometry/transform';
+import { drawItems, onImageLoaded, setPlaybackCutoff } from './render/items';
 import { ZoomWindow } from './ZoomWindow';
 import { Camera, layoutPages, type CameraState, type Insets, type Layout, type PageBox } from './view/camera';
 
@@ -64,7 +71,8 @@ export type EditorEvent =
   | { type: 'textEdit'; info: TextEditInfo | null }
   | { type: 'lassoOffer'; info: { x: number; y: number } | null }
   | { type: 'zoomWindow'; info: { height: number } | null }
-  | { type: 'link'; target: LinkTarget };
+  | { type: 'link'; target: LinkTarget }
+  | { type: 'seek'; t: number };
 
 export interface EditorState {
   tool: ToolId;
@@ -75,6 +83,7 @@ export interface EditorState {
   zoom: number;
   saveStatus: SaveStatus;
   pressureSupport: PressureSupport;
+  readMode: boolean;
 }
 
 export interface EditorOptions {
@@ -106,6 +115,10 @@ export class Editor implements ToolHost {
   private overlayDirty = false;
   private highlights = new Map<Id, Rect[]>();
   private zoom: ZoomWindow | null = null;
+  private readMode = false;
+  private playback: number | null = null;
+  private playbackSignature = -1;
+  private readonly whiteboard: boolean;
   private uiInsets: Insets;
   private eventListeners = new Set<(e: EditorEvent) => void>();
   private readonly world: HTMLDivElement;
@@ -152,6 +165,8 @@ export class Editor implements ToolHost {
     this.settings = settings;
     this.insets = opts.insets ?? { top: 0, right: 0, bottom: 0, left: 0 };
     this.uiInsets = this.insets;
+    this.whiteboard = doc.notebook.kind === 'whiteboard';
+    this.camera.whiteboard = this.whiteboard;
     root.classList.add('feder-editor');
     this.world = document.createElement('div');
     this.world.className = 'feder-world';
@@ -268,6 +283,71 @@ export class Editor implements ToolHost {
     this.uiInsets = insets;
     this.insets = { ...insets, bottom: insets.bottom + this.zoomHeight() };
     this.onResize(prevTop);
+  }
+
+  // ---------- Audio-Wiedergabe ----------
+
+  /** Wiedergabezeit setzen (ms seit Epoch); null beendet die Wiedergabe-Ansicht. */
+  setPlaybackTime(t: number | null) {
+    if (t !== null && this.playback === null) {
+      this.cancelActiveTool();
+      this.finishTextEdit();
+      this.clearSelection();
+    }
+    this.playback = t;
+    setPlaybackCutoff(t);
+    // Nur neu zeichnen, wenn sich die Zahl der „schon geschriebenen“ Elemente ändert.
+    let sig = t === null ? -1 : 0;
+    if (t !== null) {
+      for (const id of this.views.keys()) {
+        for (const it of this.doc.getItems(id) ?? [])
+          if ((it.type === 'stroke' ? it.t0 : it.createdAt) <= t) sig++;
+      }
+    }
+    if (sig === this.playbackSignature) return;
+    this.playbackSignature = sig;
+    for (const [id, view] of this.views) view.renderInk(this.doc.getItems(id));
+  }
+
+  // ---------- Lesemodus ----------
+
+  get readOnly(): boolean {
+    return this.readMode;
+  }
+
+  setReadMode(on: boolean) {
+    if (on === this.readMode) return;
+    this.cancelActiveTool();
+    this.finishTextEdit();
+    this.clearSelection();
+    this.closeZoomWindow();
+    this.readMode = on;
+    this.emit();
+  }
+
+  // ---------- Whiteboard ----------
+
+  /** Wächst die Fläche, wenn nahe am rechten oder unteren Rand gezeichnet wird. */
+  private growWhiteboard(pageId: Id, added: readonly Item[]) {
+    const page = this.doc.pages.get(pageId);
+    if (!page || !added.length) return;
+    const EDGE = 600;
+    const STEP = 2000;
+    let w = page.paper.width;
+    let h = page.paper.height;
+    for (const it of added) {
+      if (it.bbox.x + it.bbox.w > w - EDGE) w = Math.max(w, it.bbox.x + it.bbox.w + STEP);
+      if (it.bbox.y + it.bbox.h > h - EDGE) h = Math.max(h, it.bbox.y + it.bbox.h + STEP);
+    }
+    if (w === page.paper.width && h === page.paper.height) return;
+    const after = { ...page, paper: { ...page.paper, width: w, height: h } };
+    // Wachsen ist kein eigener Undo-Schritt
+    queueMicrotask(() =>
+      this.doc.execute(
+        { label: 'Fläche erweitern', items: [], pages: [{ before: page, after }] },
+        { history: false },
+      ),
+    );
   }
 
   // ---------- Zoom-Fenster ----------
@@ -449,6 +529,7 @@ export class Editor implements ToolHost {
       zoom: this.camera.zoom,
       saveStatus: this.doc.autosave.getStatus(),
       pressureSupport: this.pressure.support,
+      readMode: this.readMode,
     };
   }
 
@@ -464,7 +545,8 @@ export class Editor implements ToolHost {
       l.pageCount === s.pageCount &&
       Math.abs(l.zoom - s.zoom) < 0.005 &&
       l.saveStatus === s.saveStatus &&
-      l.pressureSupport === s.pressureSupport
+      l.pressureSupport === s.pressureSupport &&
+      l.readMode === s.readMode
     ) {
       return;
     }
@@ -649,6 +731,7 @@ export class Editor implements ToolHost {
       if (!this.sel.ids.size || !this.doc.pages.has(this.sel.pageId)) this.clearSelection();
       else this.selectionChanged();
     }
+    if (this.whiteboard) for (const [pageId, ch] of c.items) this.growWhiteboard(pageId, ch.added);
     for (const [pageId, ch] of c.items) {
       const view = this.views.get(pageId);
       const items = this.doc.getItems(pageId);
@@ -768,6 +851,13 @@ export class Editor implements ToolHost {
   }
 
   private onPointerDown = (e: PointerEvent) => {
+    if (this.readMode || this.playback !== null) {
+      // Lesemodus: jede Eingabe blättert/zoomt, Tippen öffnet Links und Tapes
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const s = this.sample(e);
+      this.beginGesture(e.pointerId, s.sx, s.sy, e.timeStamp);
+      return;
+    }
     if (e.pointerType === 'touch') {
       this.touchDown(e);
       return;
@@ -877,7 +967,10 @@ export class Editor implements ToolHost {
       this.requestFrame();
       return;
     }
-    if (e.pointerType === 'touch' && this.gestures.has(e.pointerId)) {
+    if (
+      (e.pointerType === 'touch' || this.readMode || this.playback !== null) &&
+      this.gestures.has(e.pointerId)
+    ) {
       const s = this.sample(e);
       this.gestures.move(e.pointerId, s.sx, s.sy, e.timeStamp);
     }
@@ -930,6 +1023,17 @@ export class Editor implements ToolHost {
       const r = this.zoom.rect;
       this.zoom.setRect(box.id, { ...r, x: wx - box.x - r.w * 0.1, y: wy - box.y - r.h / 2 });
       return;
+    }
+    if (this.playback !== null) {
+      // Wiedergabe: Antippen eines Strichs springt zur passenden Stelle der Aufnahme
+      const items = this.doc.getItems(box.id) ?? [];
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i]!;
+        if (it.type !== 'link' && itemHitPoint(it, wx - box.x, wy - box.y, 6)) {
+          this.fire({ type: 'seek', t: it.type === 'stroke' ? it.t0 : it.createdAt });
+          return;
+        }
+      }
     }
     if (toggleTapeAt(this, box.id, wx - box.x, wy - box.y)) return;
     if (this.followLinkAt(box.id, wx - box.x, wy - box.y)) return;
