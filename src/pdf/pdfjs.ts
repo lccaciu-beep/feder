@@ -102,3 +102,65 @@ export async function renderPdfRegion(
     signal?.removeEventListener('abort', abort);
   }
 }
+
+export interface PdfLink {
+  rect: Rect;
+  url?: string;
+  pageIndex?: number;
+}
+
+export interface PdfPageInfo {
+  width: number;
+  height: number;
+  links: PdfLink[];
+  text: string;
+}
+
+/** Seitengrößen, Links und Text eines PDFs auslesen (für Import und Suche). */
+export async function analyzePdf(doc: PDFDocumentProxy): Promise<PdfPageInfo[]> {
+  const out: PdfPageInfo[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const vp = page.getViewport({ scale: 1 });
+    const links: PdfLink[] = [];
+    try {
+      for (const a of await page.getAnnotations({ intent: 'display' })) {
+        if (a.subtype !== 'Link' || !Array.isArray(a.rect)) continue;
+        const [x1, y1] = vp.convertToViewportPoint(a.rect[0], a.rect[1]) as [number, number];
+        const [x2, y2] = vp.convertToViewportPoint(a.rect[2], a.rect[3]) as [number, number];
+        const rect = { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) };
+        const url = (a.url ?? a.unsafeUrl) as string | undefined;
+        if (url && /^(https?:|mailto:|tel:)/i.test(url)) {
+          links.push({ rect, url });
+          continue;
+        }
+        let dest = a.dest as unknown;
+        if (typeof dest === 'string') dest = await doc.getDestination(dest).catch(() => null);
+        if (Array.isArray(dest) && dest[0] != null) {
+          const ref = dest[0];
+          const pageIndex =
+            typeof ref === 'number'
+              ? ref
+              : await doc.getPageIndex(ref as Parameters<typeof doc.getPageIndex>[0]).catch(() => -1);
+          if (pageIndex >= 0) links.push({ rect, pageIndex });
+        }
+      }
+    } catch {
+      /* fehlerhafte Annotationen ignorieren */
+    }
+    let text = '';
+    try {
+      const tc = await page.getTextContent();
+      text = tc.items
+        .map((it) => ('str' in it ? it.str + (it.hasEOL ? '\n' : ' ') : ''))
+        .join('')
+        .replace(/[ \t]+/g, ' ')
+        .trim();
+    } catch {
+      /* Seite ohne Text */
+    }
+    out.push({ width: vp.width, height: vp.height, links, text });
+    page.cleanup();
+  }
+  return out;
+}

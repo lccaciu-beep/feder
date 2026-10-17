@@ -11,9 +11,12 @@ export interface PaperChoice {
   margin: boolean;
   customWmm: number;
   customHmm: number;
+  /** Gewählte Datei-Vorlage (PDF-Seite oder Bild); überschreibt die übrigen Felder. */
+  file: PaperSpec | null;
 }
 
 export function choiceToPaper(c: PaperChoice): PaperSpec {
+  if (c.file) return structuredClone(c.file);
   const params: TemplateParams = {};
   if (c.spacing !== undefined) params.spacing = c.spacing;
   if (c.template === 'ruled') params.margin = c.margin;
@@ -45,5 +48,6 @@ export function paperToChoice(p: PaperSpec): PaperChoice {
     margin: t?.params.margin ?? true,
     customWmm: Math.round(p.width / MM),
     customHmm: Math.round(p.height / MM),
+    file: t ? null : structuredClone(p),
   };
 }

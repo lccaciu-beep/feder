@@ -1,6 +1,6 @@
 import type { Item, PaperSpec } from '../../model/types';
 import { drawPaper } from '../../templates/draw';
-import { renderPdfRegion } from '../../pdf/pdfjs';
+import { renderFileBackground } from './background';
 import { drawItems } from './items';
 
 /**
@@ -19,14 +19,10 @@ export async function renderPageTo(
   if (!ctx) return;
   ctx.setTransform(k, 0, 0, k, 0, 0);
   drawPaper(ctx, paper, k);
-  const t = paper.template;
-  if (t.kind === 'pdf') {
-    const img = await renderPdfRegion(
-      t.blobId,
-      t.pageIndex,
-      { x: 0, y: 0, w: paper.width, h: paper.height },
-      k,
-    ).catch(() => null);
+  {
+    const img = await renderFileBackground(paper, { x: 0, y: 0, w: paper.width, h: paper.height }, k).catch(
+      () => null,
+    );
     if (img) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);

@@ -299,6 +299,7 @@ function drawTape(ctx: Ctx, t: TapeItem) {
 }
 
 function drawLink(ctx: Ctx, it: Item & { type: 'link' }) {
+  if (it.fromPdf) return;
   const b = it.bbox;
   ctx.save();
   ctx.fillStyle = 'rgba(39,71,201,0.08)';

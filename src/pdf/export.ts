@@ -484,7 +484,11 @@ export async function exportNotebookPdf(notebookId: Id, opts: PdfExportOptions):
       toDisplay = userToDisplay(pdfPage.getRotation().angle, pdfPage.getCropBox());
     } else {
       pdfPage = out.addPage([page.paper.width, page.paper.height]);
-      if (opts.withTemplate) drawTemplate(pdfPage, page.paper, bold);
+      if (t.kind === 'image') {
+        // Bild-Hintergründe (Scans, eigene Vorlagen) gehören zum Inhalt
+        const img = await embedImage(out, t.blobId, dc.images);
+        if (img) pdfPage.drawImage(img, { x: 0, y: 0, width: page.paper.width, height: page.paper.height });
+      } else if (opts.withTemplate) drawTemplate(pdfPage, page.paper, bold);
       toDisplay = userToDisplay(0, { x: 0, y: 0, width: page.paper.width, height: page.paper.height });
     }
     await drawContent(pdfPage, items, toDisplay, dc);

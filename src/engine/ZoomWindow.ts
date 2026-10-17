@@ -6,7 +6,7 @@
 import type { AppSettings } from '../model/settings';
 import type { Id, Item, PressureMode, Rect } from '../model/types';
 import type { NotebookDoc } from './doc/NotebookDoc';
-import { renderPdfRegion } from '../pdf/pdfjs';
+import { hasFileBackground, renderFileBackground } from './render/background';
 import { drawPaper } from '../templates/draw';
 import { drawItems } from './render/items';
 import { LiveLayer } from './render/LiveLayer';
@@ -166,11 +166,10 @@ export class ZoomWindow implements ToolHost {
     const ctx = this.bg.getContext('2d')!;
     ctx.setTransform(k, 0, 0, k, -this.rect.x * k, -this.rect.y * k);
     drawPaper(ctx, page.paper, k);
-    const t = page.paper.template;
     this.bgJob?.abort();
-    if (t.kind !== 'pdf') return;
+    if (!hasFileBackground(page.paper)) return;
     const job = (this.bgJob = new AbortController());
-    void renderPdfRegion(t.blobId, t.pageIndex, this.rect, k, job.signal).then((img) => {
+    void renderFileBackground(page.paper, this.rect, k, job.signal).then((img) => {
       if (!img || job.signal.aborted) return;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(img, 0, 0, this.bg.width, this.bg.height);

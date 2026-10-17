@@ -1,8 +1,15 @@
 <script lang="ts">
   import { PAPER_COLORS, PAPER_SIZES, TEMPLATES, templateInfo } from '../../model/paper';
   import type { BuiltinTemplateId, PaperColor } from '../../model/types';
+  import { liveQuery } from 'dexie';
   import PaperPreview from './PaperPreview.svelte';
+  import FilePreview from './FilePreview.svelte';
+  import Icon from '../components/Icon.svelte';
   import { choiceToPaper, type PaperChoice } from './paperChoice';
+  import { getDb } from '../../storage/db';
+  import { addTemplatesFromFile, deleteTemplate, templatePaper } from '../../storage/templates';
+  import { toasts } from '../stores/toast.svelte';
+  import type { CustomTemplate } from '../../model/types';
 
   let { choice = $bindable() }: { choice: PaperChoice } = $props();
 
@@ -14,7 +21,35 @@
 
   let info = $derived(templateInfo(choice.template));
 
+  const customQ = liveQuery(() => getDb().templates.orderBy('createdAt').toArray());
+  let fileInput = $state<HTMLInputElement>();
+  let editingCustom = $state(false);
+
+  function sameFile(t: CustomTemplate) {
+    const f = choice.file?.template;
+    return (
+      !!f && f.kind === t.kind && f.blobId === t.blobId && (f.kind !== 'pdf' || f.pageIndex === t.pageIndex)
+    );
+  }
+
+  async function addCustom(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const created = await addTemplatesFromFile(file);
+      if (created[0]) choice.file = templatePaper(created[0]);
+      toasts.show(created.length === 1 ? 'Vorlage hinzugefügt' : `${created.length} Vorlagen hinzugefügt`);
+    } catch (err) {
+      toasts.show(
+        `Vorlage konnte nicht angelegt werden: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   function pickTemplate(id: BuiltinTemplateId) {
+    choice.file = null;
     choice.template = id;
     choice.spacing = templateInfo(id).defaults.spacing;
   }
@@ -25,79 +60,82 @@
 </script>
 
 <div class="picker">
-  <div class="row">
-    <span class="lbl">Format</span>
-    <div class="seg">
-      {#each sizes as s (s.id)}
-        <button class:on={choice.size === s.id} onclick={() => (choice.size = s.id as PaperChoice['size'])}
-          >{s.label}</button
-        >
-      {/each}
-    </div>
-  </div>
-
-  {#if choice.size === 'custom'}
+  {#if !choice.file}
     <div class="row">
-      <span class="lbl">Maß in mm</span>
-      <div class="dims">
-        <input
-          class="field"
-          type="number"
-          min="50"
-          max="2000"
-          inputmode="numeric"
-          bind:value={choice.customWmm}
-          aria-label="Breite in mm"
-        />
-        <span>×</span>
-        <input
-          class="field"
-          type="number"
-          min="50"
-          max="2000"
-          inputmode="numeric"
-          bind:value={choice.customHmm}
-          aria-label="Höhe in mm"
-        />
+      <span class="lbl">Format</span>
+      <div class="seg">
+        {#each sizes as s (s.id)}
+          <button class:on={choice.size === s.id} onclick={() => (choice.size = s.id as PaperChoice['size'])}
+            >{s.label}</button
+          >
+        {/each}
+      </div>
+    </div>
+
+    {#if choice.size === 'custom'}
+      <div class="row">
+        <span class="lbl">Maß in mm</span>
+        <div class="dims">
+          <input
+            class="field"
+            type="number"
+            min="50"
+            max="2000"
+            inputmode="numeric"
+            bind:value={choice.customWmm}
+            aria-label="Breite in mm"
+          />
+          <span>×</span>
+          <input
+            class="field"
+            type="number"
+            min="50"
+            max="2000"
+            inputmode="numeric"
+            bind:value={choice.customHmm}
+            aria-label="Höhe in mm"
+          />
+        </div>
+      </div>
+    {/if}
+
+    <div class="row">
+      <span class="lbl">Ausrichtung</span>
+      <div class="seg">
+        <button class:on={choice.orientation === 'portrait'} onclick={() => (choice.orientation = 'portrait')}
+          >Hochformat</button
+        >
+        <button
+          class:on={choice.orientation === 'landscape'}
+          onclick={() => (choice.orientation = 'landscape')}>Querformat</button
+        >
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="lbl">Papierfarbe</span>
+      <div class="swatches">
+        {#each colors as [id, c] (id)}
+          <button
+            class="paper-swatch"
+            class:on={choice.color === id}
+            style:background={c.fill}
+            onclick={() => (choice.color = id)}
+            aria-label={c.label}
+            aria-pressed={choice.color === id}
+          ></button>
+        {/each}
       </div>
     </div>
   {/if}
-
-  <div class="row">
-    <span class="lbl">Ausrichtung</span>
-    <div class="seg">
-      <button class:on={choice.orientation === 'portrait'} onclick={() => (choice.orientation = 'portrait')}
-        >Hochformat</button
-      >
-      <button class:on={choice.orientation === 'landscape'} onclick={() => (choice.orientation = 'landscape')}
-        >Querformat</button
-      >
-    </div>
-  </div>
-
-  <div class="row">
-    <span class="lbl">Papierfarbe</span>
-    <div class="swatches">
-      {#each colors as [id, c] (id)}
-        <button
-          class="paper-swatch"
-          class:on={choice.color === id}
-          style:background={c.fill}
-          onclick={() => (choice.color = id)}
-          aria-label={c.label}
-          aria-pressed={choice.color === id}
-        ></button>
-      {/each}
-    </div>
-  </div>
 
   <div class="templates" role="listbox" aria-label="Vorlage">
     {#each TEMPLATES as t (t.id)}
       <button
         class="tpl"
-        class:on={choice.template === t.id}
+        class:on={!choice.file && choice.template === t.id}
         role="option"
-        aria-selected={choice.template === t.id}
+        aria-selected={!choice.file && choice.template === t.id}
         onclick={() => pickTemplate(t.id)}
       >
         <PaperPreview paper={previewFor(t.id)} width={choice.orientation === 'landscape' ? 92 : 66} />
@@ -106,7 +144,53 @@
     {/each}
   </div>
 
-  {#if info.spacings}
+  <div class="row">
+    <span class="lbl">Eigene Vorlagen</span>
+    <span>
+      {#if $customQ?.length}
+        <button class="link" onclick={() => (editingCustom = !editingCustom)}
+          >{editingCustom ? 'Fertig' : 'Bearbeiten'}</button
+        >
+      {/if}
+      <button class="link" onclick={() => fileInput?.click()}
+        ><Icon name="plus" size={16} /> Aus PDF oder Bild</button
+      >
+      <input
+        bind:this={fileInput}
+        type="file"
+        accept="application/pdf,.pdf,image/*"
+        hidden
+        onchange={addCustom}
+      />
+    </span>
+  </div>
+  {#if $customQ?.length}
+    <div class="templates" role="listbox" aria-label="Eigene Vorlagen">
+      {#each $customQ as t (t.id)}
+        <div class="custom-cell">
+          <button
+            class="tpl"
+            class:on={sameFile(t)}
+            role="option"
+            aria-selected={sameFile(t)}
+            onclick={() => (choice.file = templatePaper(t))}
+          >
+            <FilePreview paper={templatePaper(t)} width={66} />
+            <span>{t.name}</span>
+          </button>
+          {#if editingCustom}
+            <button
+              class="del"
+              aria-label="Vorlage {t.name} löschen"
+              onclick={() => void deleteTemplate(t.id)}><Icon name="close" size={14} /></button
+            >
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
+
+  {#if !choice.file && info.spacings}
     <div class="row">
       <span class="lbl">Abstand</span>
       <div class="seg">
@@ -119,7 +203,7 @@
       </div>
     </div>
   {/if}
-  {#if choice.template === 'ruled'}
+  {#if !choice.file && choice.template === 'ruled'}
     <label class="row check">
       <span class="lbl">Randlinie</span>
       <input type="checkbox" bind:checked={choice.margin} />
@@ -205,6 +289,38 @@
   .tpl.on {
     background: var(--accent-soft);
     color: var(--accent);
+  }
+  .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 10px;
+    color: var(--accent);
+    font: 600 14px var(--font-ui);
+  }
+  .custom-cell {
+    position: relative;
+  }
+  .custom-cell .tpl {
+    width: 100%;
+  }
+  .custom-cell span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .del {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--danger);
+    color: #fff;
   }
   .check input {
     width: 22px;

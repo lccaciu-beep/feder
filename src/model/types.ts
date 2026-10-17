@@ -186,6 +186,8 @@ export interface LinkItem extends ItemBase {
   type: 'link';
   target: LinkTarget;
   label: string;
+  /** Aus einem importierten PDF übernommen (unsichtbar, nicht auswählbar) */
+  fromPdf?: boolean;
 }
 
 export type Item = StrokeItem | ShapeItem | TextItem | ImageItem | TapeItem | LinkItem;

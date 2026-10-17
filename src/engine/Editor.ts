@@ -9,12 +9,14 @@ import type {
   Id,
   ImageItem,
   Item,
+  LinkTarget,
   PressureMode,
   Rect,
   TextItem,
   TextStyle,
 } from '../model/types';
 import { getBlobStore } from '../storage/blobstore';
+import { prepareImage } from '../io/images';
 import type { SaveStatus } from '../storage/autosave';
 import type { DocChange, NotebookDoc } from './doc/NotebookDoc';
 import { isHighlighter } from './ink/brushes';
@@ -61,7 +63,8 @@ export type EditorEvent =
   | { type: 'selection'; info: SelectionInfo | null }
   | { type: 'textEdit'; info: TextEditInfo | null }
   | { type: 'lassoOffer'; info: { x: number; y: number } | null }
-  | { type: 'zoomWindow'; info: { height: number } | null };
+  | { type: 'zoomWindow'; info: { height: number } | null }
+  | { type: 'link'; target: LinkTarget };
 
 export interface EditorState {
   tool: ToolId;
@@ -928,11 +931,29 @@ export class Editor implements ToolHost {
       return;
     }
     if (toggleTapeAt(this, box.id, wx - box.x, wy - box.y)) return;
+    if (this.followLinkAt(box.id, wx - box.x, wy - box.y)) return;
     if (this.toolId === 'text') {
       tapText(this, box.id, box, { sx, sy, pressure: 0.5, t: performance.now(), pointerType: 'touch' });
       return;
     }
     if (this.toolId === 'lasso' && this.sel && !this.selectionHandleAt(sx, sy)) this.clearSelection();
+  }
+
+  /** Verknüpfung an (x, y) öffnen. Seiten-Links springen direkt, alles andere übernimmt die UI. */
+  followLinkAt(pageId: Id, x: number, y: number): boolean {
+    const items = this.doc.getItems(pageId) ?? [];
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]!;
+      if (it.type !== 'link') continue;
+      const b = it.bbox;
+      if (x < b.x - 2 || x > b.x + b.w + 2 || y < b.y - 2 || y > b.y + b.h + 2) continue;
+      if (it.target.kind === 'page') {
+        const idx = this.doc.indexOf(it.target.pageId);
+        if (idx >= 0) this.goToPage(idx);
+      } else this.fire({ type: 'link', target: it.target });
+      return true;
+    }
+    return false;
   }
 
   // ---------- Auswahl ----------
@@ -964,7 +985,7 @@ export class Editor implements ToolHost {
   selectAll() {
     const pageId = this.doc.pageIds[this.currentPageIndex()];
     if (!pageId) return;
-    const items = this.doc.getItems(pageId) ?? [];
+    const items = (this.doc.getItems(pageId) ?? []).filter((it) => !(it.type === 'link' && it.fromPdf));
     if (!items.length) return;
     if (this.toolId !== 'lasso') this.setTool('lasso');
     this.setSelection(
@@ -1233,7 +1254,9 @@ export class Editor implements ToolHost {
 
   /** Elemente in einem Polygon (Seitenkoordinaten) auswählen. */
   selectInPolygon(pageId: Id, polygon: number[]) {
-    const items = (this.doc.getItems(pageId) ?? []).filter((it) => itemInPolygon(it, polygon));
+    const items = (this.doc.getItems(pageId) ?? []).filter(
+      (it) => !(it.type === 'link' && it.fromPdf) && itemInPolygon(it, polygon),
+    );
     if (items.length)
       this.setSelection(
         pageId,
@@ -1397,28 +1420,6 @@ export async function renderItemsPng(items: readonly Item[], scale = 3): Promise
     [...items].sort((x, y) => x.z - y.z),
   );
   const out = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
-  c.width = c.height = 0;
-  return out;
-}
-
-/** Verkleinert große Fotos und liefert die Pixelmaße. */
-async function prepareImage(file: Blob): Promise<{ blob: Blob; width: number; height: number }> {
-  const bmp = await createImageBitmap(file);
-  const MAX = 2400;
-  const k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
-  if (k >= 1 && (file.type === 'image/png' || file.type === 'image/jpeg')) {
-    const out = { blob: file, width: bmp.width, height: bmp.height };
-    bmp.close();
-    return out;
-  }
-  const c = document.createElement('canvas');
-  c.width = Math.round(bmp.width * k);
-  c.height = Math.round(bmp.height * k);
-  c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
-  bmp.close();
-  const png = file.type === 'image/png';
-  const blob = await new Promise<Blob | null>((r) => c.toBlob(r, png ? 'image/png' : 'image/jpeg', 0.9));
-  const out = { blob: blob ?? file, width: c.width, height: c.height };
   c.width = c.height = 0;
   return out;
 }

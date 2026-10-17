@@ -203,7 +203,9 @@ export class LassoTool implements Tool {
         return;
       }
       const poly = this.polygon();
-      const items = (this.host.doc.getItems(pageId) ?? []).filter((it) => itemInPolygon(it, poly));
+      const items = (this.host.doc.getItems(pageId) ?? []).filter(
+        (it) => !(it.type === 'link' && it.fromPdf) && itemInPolygon(it, poly),
+      );
       if (items.length)
         this.host.setSelection?.(
           pageId,

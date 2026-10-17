@@ -8,7 +8,7 @@
 
 import type { Item, Page, Rect } from '../../model/types';
 import { drawPaper } from '../../templates/draw';
-import { renderPdfRegion } from '../../pdf/pdfjs';
+import { hasFileBackground, renderFileBackground } from './background';
 import { drawItems } from './items';
 import { intersects } from '../geometry/rect';
 
@@ -109,13 +109,12 @@ export class PageView {
    * asynchron. Bis das PDF fertig ist, bleibt der vorherige Inhalt sichtbar.
    */
   private paintBackground(c: HTMLCanvasElement, rect: Rect, level: number, job: AbortController) {
-    const t = this.page.paper.template;
-    if (t.kind !== 'pdf') {
+    if (!hasFileBackground(this.page.paper)) {
       const ctx = regionCtx(c, rect);
       drawPaper(ctx, this.page.paper, level);
       return;
     }
-    void renderPdfRegion(t.blobId, t.pageIndex, rect, level, job.signal)
+    void renderFileBackground(this.page.paper, rect, level, job.signal)
       .then((img) => {
         if (!img || job.signal.aborted) return;
         const ctx = c.getContext('2d')!;
@@ -125,15 +124,15 @@ export class PageView {
         ctx.drawImage(img, 0, 0, c.width, c.height);
         img.width = img.height = 0;
       })
-      .catch((err) => console.warn('PDF-Seite konnte nicht gerendert werden', err));
+      .catch((err) => console.warn('Hintergrund konnte nicht gerendert werden', err));
   }
 
   renderBackground() {
     if (!this.level) return;
     this.bgJob?.abort();
     this.bgJob = new AbortController();
-    if (this.page.paper.template.kind === 'pdf') {
-      // Platzhalter, solange das PDF noch nicht gerendert ist
+    if (hasFileBackground(this.page.paper)) {
+      // Platzhalter, solange PDF bzw. Bild noch nicht gerendert ist
       const ctx = regionCtx(this.bg, this.fullRect);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, this.page.paper.width, this.page.paper.height);

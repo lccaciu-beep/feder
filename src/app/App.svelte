@@ -25,7 +25,12 @@
 
 {#if router.route.name === 'notebook'}
   {#key router.route.id}
-    <EditorView id={router.route.id} initialPage={router.route.page} onsettings={() => ui.openSettings()} />
+    <EditorView
+      id={router.route.id}
+      initialPage={router.route.page}
+      initialPageId={router.route.pageId}
+      onsettings={() => ui.openSettings()}
+    />
   {/key}
 {:else}
   <Library route={router.route} onsettings={() => ui.openSettings()} />

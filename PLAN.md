@@ -1,6 +1,6 @@
 # Feder – Umsetzungsplan
 
-Stand: 17.10.2026 · Status: **Phasen 1–2 abgeschlossen**, aus Phase 3 vorgezogen: PDF-Import/-Export und Backup
+Stand: 17.10.2026 · Status: **Phasen 1–3 abgeschlossen**
 
 > Bestätigt am 17.10.2026: E1 Svelte 5 · E2 alle Pakete aus §9 · E3 mkcert ·
 > E4 öffentliches Repo `feder` mit GitHub Pages. E5–E7 gelten als Empfehlung, solange du nicht widersprichst.
@@ -442,17 +442,17 @@ iPad-Prüfliste an dich.
 - [x] PDF-Export enthält Formen, Text (Standardschriften), Bilder (inkl. Zuschnitt/Drehung) und Tape
 - [x] Tests: Formerkennung, Transformationen, Treffertests, Export aller Typen; E2E: Formen, Lasso, Kreis-Auswahl, Text, Tape, Bild, Zoom-Fenster
 
-### Phase 3 – PDF & Daten
-- [x] PDF-Import (Datei + Drag & Drop) → OPFS, Seiten als `pdf`-Vorlage; PDF in bestehendes Notizbuch einfügen (vorgezogen)
+### Phase 3 – PDF & Daten ✅
+- [x] PDF-Import (Datei + Drag & Drop) → OPFS, Seiten als `pdf`-Vorlage; PDF in bestehendes Notizbuch einfügen
 - [x] pdf.js im Worker, scharfes Ausschnitt-Rendering beim Zoomen, Offline-Zusatzdateien (CMaps, Schriften, WASM)
-- [ ] Text-Layer für die Suche, Link-Annotationen klickbar
-- [ ] Große PDFs (500+ Seiten): auf dem iPad messen, ggf. Seitengrößen lazy ermitteln
-- [ ] Eigene Vorlagen aus PDF/Bild
-- [ ] Kamera-Scan: Foto (`capture`), Ecken setzen, Homographie-Entzerrung (eigene Implementierung), Kontrast-Filter
-- [x] Export PDF (mit/ohne Vorlage; Striche als Vektorpfade via pdf-lib, Drehung importierter Seiten berücksichtigt), PNG pro Seite, `.feder`-Notizbuch (vorgezogen)
-- [x] Teilen über Web Share API (Dateien), Fallback Download (vorgezogen)
-- [x] Vollbackup + Restore (ersetzt alles; Notizbuch-Dateien werden immer als Kopie importiert), Backup-Erinnerung (einstellbar) (vorgezogen)
-- [x] Tests: ZIP, Backup-Roundtrip, PDF-Export, Drehungs-Matrizen, Blob-Aufräumen; E2E: PDF-Import→Beschriften→Export, Backup→Restore
+- [x] Links in PDFs: Web-Links öffnen, interne Links springen zur Seite (Finger-Tipp)
+- [x] PDF-Text wird beim Import für die Suche indexiert
+- [x] Eigene Vorlagen aus PDF (eine pro Seite, max. 20) oder Bild; Vorlagen verwalten/löschen
+- [x] Kamera-Scan: Foto oder Bild, vier Ecken setzen, perspektivische Entzerrung (eigene Homographie), Filter Farbe/Graustufen/Schwarzweiß (lokaler Schwellwert); als Seite oder neues Notizbuch
+- [x] Export PDF/PNG/.feder, Teilen, Vollbackup + Restore, Backup-Erinnerung
+- [x] Bild-Hintergründe (Scans, Vorlagen) in Ansicht, Zoom-Fenster, Miniaturen und PDF-Export
+- [ ] Große PDFs (500+ Seiten): Import liest Größen/Links/Text sequenziell – auf dem iPad messen
+- [x] Tests: Homographie, Entzerrung, Suchtext, Routen; E2E: PDF-Link, Scan, eigene Vorlage
 
 ### Phase 4 – Suche & Struktur
 - [ ] Suchindex: PDF-Text, Textboxen, Titel, Tags, Lesezeichen; normalisiert (Umlaute/ß)

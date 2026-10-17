@@ -3,7 +3,7 @@
 export type Route =
   | { name: 'library'; section: 'docs'; folderId: string | null }
   | { name: 'library'; section: 'recent' | 'favorites' | 'trash' }
-  | { name: 'notebook'; id: string; page?: number };
+  | { name: 'notebook'; id: string; page?: number; pageId?: string };
 
 export function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -15,14 +15,21 @@ export function parse(hash: string): Route {
     case 'trash':
       return { name: 'library', section: parts[0] };
     case 'nb':
-      if (parts[1]) return { name: 'notebook', id: parts[1], page: parts[2] ? Number(parts[2]) : undefined };
+      if (parts[1]) {
+        const p = parts[2];
+        if (!p) return { name: 'notebook', id: parts[1] };
+        return /^\d+$/.test(p)
+          ? { name: 'notebook', id: parts[1], page: Number(p) }
+          : { name: 'notebook', id: parts[1], pageId: p };
+      }
       break;
   }
   return { name: 'library', section: 'docs', folderId: null };
 }
 
 export function href(r: Route): string {
-  if (r.name === 'notebook') return `#/nb/${r.id}`;
+  if (r.name === 'notebook')
+    return `#/nb/${r.id}${r.pageId ? `/${r.pageId}` : r.page !== undefined ? `/${r.page}` : ''}`;
   if (r.section === 'docs') return r.folderId ? `#/f/${r.folderId}` : '#/';
   return `#/${r.section}`;
 }

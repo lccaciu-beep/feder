@@ -9,6 +9,8 @@
   import MoveDialog from './MoveDialog.svelte';
   import CoverDialog from './CoverDialog.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import ScanDialog from '../components/ScanDialog.svelte';
+  import { scanPaper } from '../../io/scan/scanPage';
   import { importFiles, isFederFile } from './importFiles';
   import { isPdfFile } from '../../pdf/import';
   import { lastBackupAt } from '../../io/backup';
@@ -368,6 +370,7 @@
         { label: 'Notizbuch', icon: 'notebook', run: () => (dialog = { kind: 'new-notebook' }) },
         { label: 'Ordner', icon: 'folder', run: () => (dialog = { kind: 'new-folder' }) },
         { label: 'PDF importieren …', icon: 'page', run: () => pdfInput?.click() },
+        { label: 'Dokument scannen …', icon: 'image', run: () => (scanOpen = true) },
         { label: 'Feder-Datei importieren …', icon: 'restore', run: () => federInput?.click() },
       ],
     };
@@ -378,6 +381,20 @@
   let pdfInput = $state<HTMLInputElement>();
   let federInput = $state<HTMLInputElement>();
   let dropping = $state(false);
+  let scanOpen = $state(false);
+
+  async function newScanNotebook(blob: Blob, width: number, height: number) {
+    const paper = await scanPaper(blob, width, height);
+    const date = new Date().toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
+    const nb = await lib.createNotebook({
+      title: `Scan vom ${date}`,
+      folderId: section === 'docs' ? folderId : null,
+      cover: { color: '#6b7280', pattern: 'plain' },
+      pages: [paper],
+      paper: { ...paper, template: { kind: 'builtin', id: 'blank', params: {} } },
+    });
+    router.go({ name: 'notebook', id: nb.id });
+  }
 
   async function runImport(files: File[]) {
     if (!files.length) return;
@@ -716,6 +733,14 @@
 
 {#if menu}
   <Menu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
+
+{#if scanOpen}
+  <ScanDialog
+    confirm="Notizbuch anlegen"
+    onclose={() => (scanOpen = false)}
+    onresult={(b, w, h) => void newScanNotebook(b, w, h)}
+  />
 {/if}
 
 {#if dialog?.kind === 'new-notebook'}

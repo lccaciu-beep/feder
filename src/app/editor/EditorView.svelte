@@ -11,6 +11,9 @@
   import ElementsPopover from './ElementsPopover.svelte';
   import CropDialog from './CropDialog.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import ScanDialog from '../components/ScanDialog.svelte';
+  import { scanPaper } from '../../io/scan/scanPage';
+  import { makePage } from '../../storage/library';
   import { insertPdfPages } from '../../pdf/import';
   import {
     Editor,
@@ -28,9 +31,14 @@
   import { router } from '../stores/router.svelte';
   import { settings } from '../stores/settings.svelte';
   import { toasts } from '../stores/toast.svelte';
-  import type { Id, ImageItem, PaperSpec } from '../../model/types';
+  import type { Id, ImageItem, LinkTarget, PaperSpec } from '../../model/types';
 
-  let { id, initialPage, onsettings }: { id: Id; initialPage?: number; onsettings: () => void } = $props();
+  let {
+    id,
+    initialPage,
+    initialPageId,
+    onsettings,
+  }: { id: Id; initialPage?: number; initialPageId?: string; onsettings: () => void } = $props();
 
   let host = $state<HTMLDivElement>();
   let barEl = $state<HTMLDivElement>();
@@ -53,6 +61,15 @@
   let elementsAt = $state<{ x: number; y: number } | null>(null);
   let saveElementOpen = $state(false);
   let cropItem = $state.raw<ImageItem | null>(null);
+  let scanOpen = $state(false);
+
+  async function addScan(blob: Blob, width: number, height: number) {
+    if (!doc || !editor) return;
+    const paper = await scanPaper(blob, width, height);
+    const index = (st?.pageIndex ?? 0) + 1;
+    doc.insertPages(index, [makePage(doc.id, paper)], 'Scan einfügen');
+    editor.goToPage(index);
+  }
   let error = $state<string | null>(null);
   let zoomHint = $state<string | null>(null);
   let zoomTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,7 +87,7 @@
         pageIds = [...d.pageIds];
         const ed = new Editor(host!, d, settings.snapshot(), {
           insets: insets(),
-          initialPage: initialPage ?? 0,
+          initialPage: initialPageId ? Math.max(0, d.indexOf(initialPageId)) : (initialPage ?? 0),
         });
         editor = ed;
         cleanups.push(
@@ -85,6 +102,7 @@
             else if (e.type === 'textEdit') textEdit = e.info;
             else if (e.type === 'lassoOffer') lassoOffer = e.info;
             else if (e.type === 'zoomWindow') zoomWin = e.info;
+            else if (e.type === 'link') openLink(e.target);
           }),
         );
         cleanups.push(
@@ -223,6 +241,15 @@
     }
   }
 
+  function openLink(t: LinkTarget) {
+    if (t.kind === 'url') window.open(t.url, '_blank', 'noopener');
+    else if (t.kind === 'notebook') {
+      editor?.finishTextEdit();
+      void doc?.autosave.flush();
+      router.go({ name: 'notebook', id: t.notebookId, pageId: t.pageId });
+    }
+  }
+
   function moreMenu(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const vertical = settings.value.scrollDirection === 'vertical';
@@ -232,6 +259,7 @@
       items: [
         { label: 'Exportieren …', icon: 'share', run: () => (showExport = true) },
         { label: 'PDF einfügen …', icon: 'page-plus', run: () => pdfInput?.click() },
+        { label: 'Dokument scannen …', icon: 'image', run: () => (scanOpen = true) },
         {
           label: 'Vorlage ändern …',
           icon: 'template',
@@ -572,6 +600,10 @@
       );
     }}
   />
+{/if}
+
+{#if scanOpen}
+  <ScanDialog onclose={() => (scanOpen = false)} onresult={(b, w, h) => void addScan(b, w, h)} />
 {/if}
 
 {#if showExport && doc}
