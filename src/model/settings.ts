@@ -56,6 +56,8 @@ export interface AppSettings {
   velocitySensitivity: number;
   scrollDirection: ScrollDirection;
   zigzagErase: boolean;
+  /** Welliges Durchstreichen löscht Text */
+  waveErase: boolean;
   tapGestures: boolean;
   holdToStraighten: boolean;
   debugOverlay: boolean;
@@ -84,6 +86,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   velocitySensitivity: 0.5,
   scrollDirection: 'vertical',
   zigzagErase: true,
+  waveErase: true,
   tapGestures: true,
   holdToStraighten: true,
   debugOverlay: false,

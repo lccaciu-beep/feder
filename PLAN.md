@@ -521,4 +521,5 @@ Keine Laufzeitabhängigkeiten über die Vorgaben hinaus.
 | 17.10.2026 | Schema v2: Tabellen für Elemente, Lesezeichen, Outline, Suchindex, Vorlagen, Audio, Lernkarten auf einmal angelegt; Formen bekommen fillOpacity/opacity |
 | 17.10.2026 | Text wird auf dem Canvas gezeichnet (gleich wie im Export); bearbeitet wird in einem echten Textfeld darüber (Scribble) |
 | 17.10.2026 | Transformationen nur als Ähnlichkeit (Verschieben, gleichmäßig Skalieren, Drehen) – kein Verzerren |
+| 17.10.2026 | Welliges Durchstreichen löscht Striche und Textfelder (eigene Erkennung neben dem Zickzack, in den Einstellungen abschaltbar) |
 | 17.10.2026 | Design: Löschblatt-Blaugrau, Tinte Blauschwarz, Akzent Königsblau, Schrift Avenir Next (auf dem iPad vorhanden, offline) |

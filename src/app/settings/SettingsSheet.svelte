@@ -200,6 +200,14 @@
       />
     </label>
     <label class="row">
+      <span>Welliges Durchstreichen löscht<small>Eine Wellenlinie quer durch Text entfernt ihn</small></span>
+      <input
+        type="checkbox"
+        checked={s.waveErase}
+        onchange={() => settings.update((v) => (v.waveErase = !v.waveErase))}
+      />
+    </label>
+    <label class="row">
       <span
         >Kreis um Inhalte bietet Auswahl an<small>Nach einem Kreis mit dem Stift erscheint „Auswählen“</small
         ></span

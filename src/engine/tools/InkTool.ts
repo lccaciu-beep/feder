@@ -10,7 +10,7 @@ import { shapePath } from '../render/items';
 import { makeShape, type ShapeStyle } from './factory';
 import { applyInkStyle, centerlinePath, outlineToPath, strokeOptions, toFreehandInput } from '../ink/brushes';
 import { StrokeBuilder, type StrokeStyle } from '../ink/capture';
-import { isZigzag, zigzagTargets } from '../geometry/hit';
+import { isZigzag, wavyStrike, wavyTargets, zigzagTargets } from '../geometry/hit';
 import { pointsBBox } from '../geometry/rect';
 import type { PageBox } from '../view/camera';
 import { toPage, type Sample, type Tool, type ToolHost } from './types';
@@ -236,6 +236,23 @@ export class InkTool implements Tool {
           pages: [],
         });
         return;
+      }
+    }
+
+    // Welliges Durchstreichen: löscht durchgestrichene Striche und Textfelder
+    if (this.kind === 'pen' && !this.straight && !this.shapePreview && settings.waveErase) {
+      const wave = wavyStrike(b.points, b.stride);
+      if (wave) {
+        const targets = wavyTargets(wave, b.points, b.stride, b.style.width, doc.getItems(pageId) ?? []);
+        if (targets.length) {
+          live.clear();
+          doc.execute({
+            label: 'Durchstreichen löschen',
+            items: targets.map((t) => ({ before: t, after: null })),
+            pages: [],
+          });
+          return;
+        }
       }
     }
 

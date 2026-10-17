@@ -55,6 +55,7 @@ Tabs, Lesemodus.
 | zeichnen und halten | gerade Linie bzw. erkannte Form |
 | Kreis um Inhalt mit dem Stift | „Auswählen“ erscheint |
 | Zickzack über Striche | löscht sie |
+| Wellenlinie quer durch Text | löscht den durchgestrichenen Text (abschaltbar) |
 
 Mit „Mit dem Finger zeichnen“ (Einstellungen) schreibt der Finger, und gescrollt wird mit
 zwei Fingern.

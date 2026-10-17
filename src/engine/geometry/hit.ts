@@ -251,3 +251,137 @@ export function snapLineEnd(x0: number, y0: number, x1: number, y1: number, snap
   }
   return [x1, y1];
 }
+
+// ---------- Welliges Durchstreichen ----------
+
+export interface WavyStrike {
+  /** Startpunkt und Richtung (Einheitsvektor) der Durchstreichung */
+  ox: number;
+  oy: number;
+  ux: number;
+  uy: number;
+  /** Ausdehnung entlang der Richtung (t) und quer dazu (d) */
+  minT: number;
+  maxT: number;
+  minD: number;
+  maxD: number;
+}
+
+/**
+ * Erkennt eine wellige Linie, mit der Text durchgestrichen wird: läuft
+ * überwiegend in eine Richtung und schwingt mindestens vier Mal quer dazu,
+ * mit kleiner Amplitude im Verhältnis zur Länge.
+ */
+export function wavyStrike(points: ArrayLike<number>, stride: number): WavyStrike | null {
+  const n = Math.floor(points.length / stride);
+  if (n < 10) return null;
+  const ox = points[0]!;
+  const oy = points[1]!;
+  const ex = points[(n - 1) * stride]!;
+  const ey = points[(n - 1) * stride + 1]!;
+  const L = Math.hypot(ex - ox, ey - oy);
+  if (L < 24) return null;
+  const ux = (ex - ox) / L;
+  const uy = (ey - oy) / L;
+  let minT = Infinity;
+  let maxT = -Infinity;
+  let minD = Infinity;
+  let maxD = -Infinity;
+  let backtrack = 0;
+  let prevT = 0;
+  const ds: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const dx = points[i * stride]! - ox;
+    const dy = points[i * stride + 1]! - oy;
+    const t = dx * ux + dy * uy;
+    const d = -dx * uy + dy * ux;
+    if (i > 0 && t < prevT) backtrack += prevT - t;
+    prevT = t;
+    minT = Math.min(minT, t);
+    maxT = Math.max(maxT, t);
+    minD = Math.min(minD, d);
+    maxD = Math.max(maxD, d);
+    ds.push(d);
+  }
+  const amplitude = (maxD - minD) / 2;
+  // vorwärts laufend, flache Welle, aber deutlich gewellt
+  if (backtrack > L * 0.15 || amplitude < 1.5 || amplitude > L * 0.2) return null;
+  if (pathLength(points, stride) < L * 1.06) return null;
+  const hysteresis = Math.max(1, amplitude * 0.5);
+  let reversals = 0;
+  let dir = 0;
+  let ext = ds[0]!;
+  for (const d of ds) {
+    if (dir === 0) {
+      if (d - ext > hysteresis) [dir, ext] = [1, d];
+      else if (ext - d > hysteresis) [dir, ext] = [-1, d];
+    } else if (dir === 1) {
+      if (d > ext) ext = d;
+      else if (ext - d > hysteresis) [reversals, dir, ext] = [reversals + 1, -1, d];
+    } else {
+      if (d < ext) ext = d;
+      else if (d - ext > hysteresis) [reversals, dir, ext] = [reversals + 1, 1, d];
+    }
+  }
+  if (reversals < 4) return null;
+  return { ox, oy, ux, uy, minT, maxT, minD, maxD };
+}
+
+/** Elemente, die von einer welligen Durchstreichung getroffen werden. */
+export function wavyTargets<T extends { type: string; bbox: { x: number; y: number; w: number; h: number } }>(
+  wave: WavyStrike,
+  zig: ArrayLike<number>,
+  stride: number,
+  zigWidth: number,
+  items: readonly T[],
+): T[] {
+  const out: T[] = [];
+  const project = (x: number, y: number) => {
+    const dx = x - wave.ox;
+    const dy = y - wave.oy;
+    return [dx * wave.ux + dy * wave.uy, -dx * wave.uy + dy * wave.ux] as const;
+  };
+  for (const it of items) {
+    if (it.type !== 'stroke' && it.type !== 'text') continue;
+    const b = it.bbox;
+    // Ecken der Box in das Koordinatensystem der Welle
+    let t0 = Infinity;
+    let t1 = -Infinity;
+    let d0 = Infinity;
+    let d1 = -Infinity;
+    for (const [x, y] of [
+      [b.x, b.y],
+      [b.x + b.w, b.y],
+      [b.x, b.y + b.h],
+      [b.x + b.w, b.y + b.h],
+    ] as const) {
+      const [t, d] = project(x, y);
+      t0 = Math.min(t0, t);
+      t1 = Math.max(t1, t);
+      d0 = Math.min(d0, d);
+      d1 = Math.max(d1, d);
+    }
+    // Größtenteils innerhalb der Länge der Welle …
+    const overlapT = Math.min(t1, wave.maxT + 2) - Math.max(t0, wave.minT - 2);
+    if (overlapT < (t1 - t0) * 0.7) continue;
+    // … und die Welle läuft quer durch das Element
+    if (d1 < wave.minD || d0 > wave.maxD) continue;
+    if (it.type === 'stroke') {
+      const s = it as unknown as StrokeItem;
+      let touched = false;
+      for (let i = 0; i + stride + 1 < zig.length && !touched; i += stride) {
+        touched = strokeHitsCapsule(
+          s,
+          zig[i]!,
+          zig[i + 1]!,
+          zig[i + stride]!,
+          zig[i + stride + 1]!,
+          zigWidth / 2 + 1.5,
+        );
+      }
+      if (!touched) continue;
+    }
+    out.push(it);
+  }
+  return out;
+}
