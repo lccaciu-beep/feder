@@ -111,6 +111,6 @@ test('Eigene Vorlage aus einem PDF', async ({ page }) => {
   const size = await page
     .locator('.feder-page')
     .first()
-    .evaluate((el) => (el as HTMLElement).style.width);
-  expect(size).toBe('420px');
+    .evaluate((el) => (el as HTMLElement).dataset.w);
+  expect(size).toBe('420');
 });

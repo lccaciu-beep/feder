@@ -280,7 +280,7 @@ export function wavyStrike(points: ArrayLike<number>, stride: number): WavyStrik
   const ex = points[(n - 1) * stride]!;
   const ey = points[(n - 1) * stride + 1]!;
   const L = Math.hypot(ex - ox, ey - oy);
-  if (L < 24) return null;
+  if (L < 15) return null;
   const ux = (ex - ox) / L;
   const uy = (ey - oy) / L;
   let minT = Infinity;
@@ -305,8 +305,8 @@ export function wavyStrike(points: ArrayLike<number>, stride: number): WavyStrik
   }
   const amplitude = (maxD - minD) / 2;
   // vorwärts laufend, flache Welle, aber deutlich gewellt
-  if (backtrack > L * 0.15 || amplitude < 1.5 || amplitude > L * 0.2) return null;
-  if (pathLength(points, stride) < L * 1.06) return null;
+  if (backtrack > L * 0.2 || amplitude < 1.2 || amplitude > L * 0.35) return null;
+  if (pathLength(points, stride) < L * 1.05) return null;
   const hysteresis = Math.max(1, amplitude * 0.5);
   let reversals = 0;
   let dir = 0;
@@ -323,7 +323,7 @@ export function wavyStrike(points: ArrayLike<number>, stride: number): WavyStrik
       else if (d - ext > hysteresis) [reversals, dir, ext] = [reversals + 1, 1, d];
     }
   }
-  if (reversals < 4) return null;
+  if (reversals < 3) return null;
   return { ox, oy, ux, uy, minT, maxT, minD, maxD };
 }
 
@@ -361,10 +361,16 @@ export function wavyTargets<T extends { type: string; bbox: { x: number; y: numb
       d0 = Math.min(d0, d);
       d1 = Math.max(d1, d);
     }
-    // Größtenteils innerhalb der Länge der Welle …
-    const overlapT = Math.min(t1, wave.maxT + 2) - Math.max(t0, wave.minT - 2);
-    if (overlapT < (t1 - t0) * 0.7) continue;
-    // … und die Welle läuft quer durch das Element
+    // Mindestens zur Hälfte innerhalb der Länge der Welle …
+    const overlapT = Math.min(t1, wave.maxT + 3) - Math.max(t0, wave.minT - 3);
+    if (overlapT < (t1 - t0) * 0.5) continue;
+    // Kleine Zeichen (i-Punkte, Akzente) dicht über/unter der Welle gehören dazu
+    if (it.type === 'stroke' && Math.hypot(b.w, b.h) < 8) {
+      const pad = Math.max((wave.maxD - wave.minD) * 0.75, 10);
+      if (d0 >= wave.minD - pad && d1 <= wave.maxD + pad && overlapT >= (t1 - t0) * 0.9) out.push(it);
+      continue;
+    }
+    // … sonst muss die Welle quer durch das Element laufen
     if (d1 < wave.minD || d0 > wave.maxD) continue;
     if (it.type === 'stroke') {
       const s = it as unknown as StrokeItem;

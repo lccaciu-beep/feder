@@ -71,7 +71,7 @@ test('Whiteboard wächst am Rand mit', async ({ page }) => {
     page
       .locator('.feder-page')
       .first()
-      .evaluate((el) => parseFloat((el as HTMLElement).style.width));
+      .evaluate((el) => parseFloat((el as HTMLElement).dataset.w ?? '0'));
   expect(await width()).toBe(4000);
   // weit hinauszoomen und am rechten Rand schreiben
   for (let i = 0; i < 6; i++) await page.keyboard.press('Meta+-');

@@ -16,8 +16,8 @@ describe('Welliges Durchstreichen', () => {
     expect(wavyStrike(w.points, 4)).not.toBeNull();
     expect(isZigzag(w.points, 4)).toBe(false);
     expect(wavyStrike(line(0, 0, 200, 0).points, 4)).toBeNull();
-    // „mm“ in Schreibschrift: hohe Bögen im Verhältnis zur Länge
-    expect(wavyStrike(wave(0, 0, 40, 10, 3).points, 4)).toBeNull();
+    // hohe Schleifen („ll“) sind kein Durchstreichen
+    expect(wavyStrike(wave(0, 0, 40, 20, 3).points, 4)).toBeNull();
     // zu wenige Schwingungen
     expect(wavyStrike(wave(0, 0, 160, 4, 1).points, 4)).toBeNull();
   });
@@ -41,7 +41,9 @@ describe('Welliges Durchstreichen', () => {
     const above = stroke([60, 40, 90, 45]); // Zeile darüber
     const right = stroke([400, 95, 430, 105]); // außerhalb der Welle
     const text = { type: 'text', bbox: { x: 120, y: 92, w: 80, h: 16 } };
-    const hits = wavyTargets(info, w.points, 4, 1.4, [crossed, above, right, text]);
-    expect(hits).toEqual([crossed, text]);
+    const dot = stroke([150, 91, 150.5, 91.5], { width: 2 }); // i-Punkt knapp über der Welle
+    const longWord = stroke([200, 95, 225, 105, 250, 95, 270, 105]); // ragt zur Hälfte heraus
+    const hits = wavyTargets(info, w.points, 4, 1.4, [crossed, above, right, text, dot, longWord]);
+    expect(hits).toEqual([crossed, text, dot, longWord]);
   });
 });

@@ -2,25 +2,29 @@ import { expect, test, type Page } from '@playwright/test';
 
 type Pt = [number, number];
 
-async function pen(page: Page, points: Pt[]) {
-  await page.evaluate((points) => {
-    const host = document.querySelector('.feder-editor')!;
-    const fire = (type: string, [x, y]: Pt) =>
-      host.dispatchEvent(
-        new PointerEvent(type, {
-          pointerType: 'pen',
-          pointerId: 5,
-          clientX: x,
-          clientY: y,
-          pressure: type === 'pointerup' ? 0 : 0.5,
-          buttons: type === 'pointerup' ? 0 : 1,
-          bubbles: true,
-        }),
-      );
-    fire('pointerdown', points[0]!);
-    for (const p of points.slice(1)) fire('pointermove', p);
-    fire('pointerup', points[points.length - 1]!);
-  }, points);
+async function pen(page: Page, points: Pt[], holdMs = 0) {
+  await page.evaluate(
+    async ({ points, holdMs }) => {
+      const host = document.querySelector('.feder-editor')!;
+      const fire = (type: string, [x, y]: Pt) =>
+        host.dispatchEvent(
+          new PointerEvent(type, {
+            pointerType: 'pen',
+            pointerId: 5,
+            clientX: x,
+            clientY: y,
+            pressure: type === 'pointerup' ? 0 : 0.5,
+            buttons: type === 'pointerup' ? 0 : 1,
+            bubbles: true,
+          }),
+        );
+      fire('pointerdown', points[0]!);
+      for (const p of points.slice(1)) fire('pointermove', p);
+      if (holdMs) await new Promise((r) => setTimeout(r, holdMs));
+      fire('pointerup', points[points.length - 1]!);
+    },
+    { points, holdMs },
+  );
 }
 
 async function itemCount(page: Page): Promise<number> {
@@ -62,6 +66,14 @@ test('Welliges Durchstreichen löscht das Wort', async ({ page }) => {
   // rückgängig holt das Wort zurück
   await page.getByRole('button', { name: /Rückgängig/ }).click();
   await expect.poll(() => itemCount(page)).toBe(1);
+});
+
+test('Auch mit kurzem Halten am Ende wird gelöscht (keine gerade Linie)', async ({ page }) => {
+  await open(page);
+  await pen(page, word);
+  await expect.poll(() => itemCount(page)).toBe(1);
+  await pen(page, wave, 900);
+  await expect.poll(() => itemCount(page)).toBe(0);
 });
 
 test('Ausgeschaltet bleibt die Welle als Strich stehen', async ({ page }) => {

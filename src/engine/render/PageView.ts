@@ -2,8 +2,9 @@
 // Ink-Canvas (fertige Striche, gecacht) und bei starkem Zoom ein
 // Detail-Paar (Hintergrund + Tinte), das nur den sichtbaren Ausschnitt scharf zeigt.
 //
-// Das Element liegt in Seitenkoordinaten (1 CSS-px = 1 pt) und wird per
-// CSS-Transform auf die Bildschirmposition und den Zoom gebracht.
+// Das Element hat immer die echte Bildschirmgröße (keine CSS-Skalierung):
+// Safari rastert skalierte Ebenen in Ausgangsgröße und vergrößert sie dann,
+// das macht Schrift unscharf. Verschoben wird nur per translate.
 // PDF-Hintergründe werden asynchron im pdf.js-Worker gerendert.
 
 import type { Item, Page, Rect } from '../../model/types';
@@ -44,6 +45,8 @@ export class PageView {
   /** Ausschnitt (pt) und Auflösung der Detail-Ebenen, falls aktiv. */
   detailRect: Rect | null = null;
   detailLevel = 0;
+  /** aktueller Zoom (CSS-px pro pt) */
+  private scale = 1;
 
   constructor(
     public page: Page,
@@ -69,8 +72,23 @@ export class PageView {
   }
 
   private applySize() {
-    this.el.style.width = `${this.page.paper.width}px`;
-    this.el.style.height = `${this.page.paper.height}px`;
+    this.el.dataset.w = String(this.page.paper.width);
+    this.el.dataset.h = String(this.page.paper.height);
+    this.el.style.width = `${this.page.paper.width * this.scale}px`;
+    this.el.style.height = `${this.page.paper.height * this.scale}px`;
+    this.placeDetail();
+  }
+
+  /** Detail-Ebenen in Bildschirmgröße über ihren Ausschnitt legen. */
+  private placeDetail() {
+    const r = this.detailRect;
+    if (!r) return;
+    for (const c of [this.detailBg, this.detailInk]) {
+      c.style.left = `${r.x * this.scale}px`;
+      c.style.top = `${r.y * this.scale}px`;
+      c.style.width = `${r.w * this.scale}px`;
+      c.style.height = `${r.h * this.scale}px`;
+    }
   }
 
   private get fullRect(): Rect {
@@ -91,7 +109,11 @@ export class PageView {
     // Auf Gerätepixel runden, damit die Detail-Ebenen 1:1 abgebildet werden.
     const rx = Math.round(sx * dpr) / dpr;
     const ry = Math.round(sy * dpr) / dpr;
-    this.el.style.transform = `translate3d(${rx}px, ${ry}px, 0) scale(${scale})`;
+    this.el.style.transform = `translate3d(${rx}px, ${ry}px, 0)`;
+    if (scale !== this.scale) {
+      this.scale = scale;
+      this.applySize();
+    }
   }
 
   /** Setzt Hintergrund- und Ink-Canvas auf eine neue Auflösung und zeichnet neu. */
@@ -184,11 +206,8 @@ export class PageView {
     this.detailLevel = level;
     for (const c of [this.detailBg, this.detailInk]) {
       sizeCanvas(c, rect.w * level, rect.h * level);
-      c.style.left = `${rect.x}px`;
-      c.style.top = `${rect.y}px`;
-      c.style.width = `${rect.w}px`;
-      c.style.height = `${rect.h}px`;
     }
+    this.placeDetail();
     this.showDetail(true);
     this.renderDetailBackground();
     this.renderDetailInk(items, filter);

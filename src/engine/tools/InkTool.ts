@@ -3,7 +3,7 @@
 // Kreise um Inhalte (Auswahl anbieten).
 
 import { getStroke } from 'perfect-freehand';
-import type { Id, StrokeItem } from '../../model/types';
+import type { Id, Item, StrokeItem } from '../../model/types';
 import { recognizeShape, type Recognized } from '../geometry/shapes';
 import { itemInPolygon } from '../geometry/transform';
 import { shapePath } from '../render/items';
@@ -148,7 +148,8 @@ export class InkTool implements Tool {
       !this.shapePreview &&
       (this.kind === 'shape' || (this.kind === 'pen' && this.host.settings.holdToStraighten)) &&
       now - this.hold.t > HOLD_MS &&
-      this.screenLength > HOLD_MIN_LENGTH_PX
+      this.screenLength > HOLD_MIN_LENGTH_PX &&
+      !this.isEraseGesture(b)
     ) {
       const rec = recognizeShape(b.points, b.stride);
       if (rec && rec.shape !== 'line') this.shapePreview = rec;
@@ -224,36 +225,17 @@ export class InkTool implements Tool {
     const pageId = this.pageId;
     this.builder = null;
 
-    if (this.kind === 'pen' && !this.straight && settings.zigzagErase && isZigzag(b.points, b.stride)) {
-      const items = doc.getItems(pageId) ?? [];
-      const strokes = items.filter((it): it is StrokeItem => it.type === 'stroke');
-      const targets = zigzagTargets(b.points, b.stride, b.style.width, strokes);
-      if (targets.length) {
-        live.clear();
-        doc.execute({
-          label: 'Zickzack löschen',
-          items: targets.map((t) => ({ before: t, after: null })),
-          pages: [],
-        });
-        return;
-      }
-    }
-
-    // Welliges Durchstreichen: löscht durchgestrichene Striche und Textfelder
-    if (this.kind === 'pen' && !this.straight && !this.shapePreview && settings.waveErase) {
-      const wave = wavyStrike(b.points, b.stride);
-      if (wave) {
-        const targets = wavyTargets(wave, b.points, b.stride, b.style.width, doc.getItems(pageId) ?? []);
-        if (targets.length) {
-          live.clear();
-          doc.execute({
-            label: 'Durchstreichen löschen',
-            items: targets.map((t) => ({ before: t, after: null })),
-            pages: [],
-          });
-          return;
-        }
-      }
+    // Durchkritzeln (Zickzack) oder welliges Durchstreichen löscht
+    const erase =
+      this.kind === 'pen' && !this.straight && !this.shapePreview ? this.eraseTargets(b, pageId) : null;
+    if (erase?.length) {
+      live.clear();
+      doc.execute({
+        label: 'Durchstreichen löschen',
+        items: erase.map((t) => ({ before: t, after: null })),
+        pages: [],
+      });
+      return;
     }
 
     const at = { pageId, notebookId: doc.id, z: doc.topZ(pageId) + 1 };
@@ -287,6 +269,36 @@ export class InkTool implements Tool {
     });
     live.clear();
     if (offer) this.host.offerLasso?.(pageId, offer, item.id);
+  }
+
+  /** Elemente, die ein Zickzack oder eine Wellenlinie löschen würde (sonst null). */
+  private eraseTargets(b: StrokeBuilder, pageId: Id): Item[] | null {
+    const { settings, doc } = this.host;
+    const items = doc.getItems(pageId) ?? [];
+    if (settings.zigzagErase && isZigzag(b.points, b.stride)) {
+      const strokes = items.filter((it): it is StrokeItem => it.type === 'stroke');
+      const targets = zigzagTargets(b.points, b.stride, b.style.width, strokes);
+      if (targets.length) return targets;
+    }
+    if (settings.waveErase) {
+      const wave = wavyStrike(b.points, b.stride);
+      if (wave) {
+        const targets = wavyTargets(wave, b.points, b.stride, b.style.width, items);
+        if (targets.length) return targets;
+      }
+    }
+    return null;
+  }
+
+  /** Beim Halten am Ende keine Linie/Form erzeugen, wenn gerade durchgestrichen wird. */
+  private eraseCache = { count: -1, result: false };
+
+  private isEraseGesture(b: StrokeBuilder): boolean {
+    if (this.kind !== 'pen') return false;
+    if (this.eraseCache.count !== b.count) {
+      this.eraseCache = { count: b.count, result: !!this.eraseTargets(b, this.pageId)?.length };
+    }
+    return this.eraseCache.result;
   }
 
   /** Geschlossene Schleife um vorhandene Inhalte? Dann Polygon zurückgeben. */
