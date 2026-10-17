@@ -116,6 +116,8 @@ export class Editor implements ToolHost {
   private highlights = new Map<Id, Rect[]>();
   private zoom: ZoomWindow | null = null;
   private readMode = false;
+  /** Hat der Nutzer schon gescrollt, gezoomt oder geschrieben? */
+  private interacted = false;
   private playback: number | null = null;
   private playbackSignature = -1;
   private readonly whiteboard: boolean;
@@ -285,7 +287,15 @@ export class Editor implements ToolHost {
     const prevTop = this.insets.top;
     this.uiInsets = insets;
     this.insets = { ...insets, bottom: insets.bottom + this.zoomHeight() };
-    this.onResize(prevTop);
+    if (!this.interacted) {
+      // Erster Aufbau: Inhalt unter die (wachsende) Werkzeugleiste schieben
+      this.onResize(prevTop);
+      return;
+    }
+    // Danach darf ein Höhenwechsel der Leiste (z. B. Werkzeugwechsel) die Seite nicht verschieben.
+    this.measure();
+    this.camera.clamp();
+    this.invalidateCamera();
   }
 
   // ---------- Audio-Wiedergabe ----------
@@ -900,6 +910,7 @@ export class Editor implements ToolHost {
     }
     this.dismissLassoOffer();
     if (this.textEdit) this.finishTextEdit();
+    this.interacted = true;
     this.activePointer = e.pointerId;
     this.activeType = e.pointerType;
     try {
@@ -953,6 +964,7 @@ export class Editor implements ToolHost {
   }
 
   private beginGesture(id: number, sx: number, sy: number, t: number) {
+    this.interacted = true;
     if (!this.gestures.count) this.gestureCamStart = this.camera.snapshot();
     this.stopMotion();
     this.gestures.down(id, sx, sy, t);
@@ -1005,6 +1017,7 @@ export class Editor implements ToolHost {
   };
 
   private onWheel = (e: WheelEvent) => {
+    this.interacted = true;
     e.preventDefault();
     this.stopMotion();
     const sx = e.clientX - this.rootRect.left;
