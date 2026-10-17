@@ -8,6 +8,7 @@ import type { FederDB } from '../../storage/db';
 import { Autosave, type Op } from '../../storage/autosave';
 import { makePage } from '../../storage/library';
 import { History, isEmpty, type Change, type Command } from '../history/history';
+import { tokenize } from '../../search/text';
 
 export interface PageItemChange {
   added: Item[];
@@ -225,7 +226,61 @@ export class NotebookDoc {
     }
 
     this.autosave.enqueue(ops);
+    for (const [pageId, c] of change.items) {
+      if ([...c.added, ...c.removed].some((it) => it.type === 'text')) this.scheduleReindex(pageId);
+    }
     for (const l of this.listeners) l(change);
+  }
+
+  // ---------- Suchindex für Textfelder ----------
+
+  private reindexPages = new Set<Id>();
+  private reindexTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private scheduleReindex(pageId: Id) {
+    this.reindexPages.add(pageId);
+    if (this.reindexTimer) clearTimeout(this.reindexTimer);
+    this.reindexTimer = setTimeout(() => void this.flushReindex(), 800);
+  }
+
+  /** Text aller Textfelder einer Seite in den Suchindex schreiben. */
+  async flushReindex(): Promise<void> {
+    if (this.reindexTimer) clearTimeout(this.reindexTimer);
+    this.reindexTimer = null;
+    const pages = [...this.reindexPages];
+    this.reindexPages.clear();
+    for (const pageId of pages) {
+      const items = this.items.get(pageId);
+      if (!items) continue;
+      const text = items
+        .filter((it) => it.type === 'text')
+        .map((it) => (it as { text: string }).text)
+        .join('\n')
+        .trim();
+      const id = `${pageId}:text`;
+      if (text) {
+        await this.db.textIndex.put({
+          id,
+          notebookId: this.id,
+          pageId,
+          source: 'text',
+          text,
+          tokens: tokenize(text),
+        });
+      } else await this.db.textIndex.delete(id);
+    }
+  }
+
+  /** Stichworte einer Seite setzen (rückgängig machbar). */
+  setTags(pageId: Id, tags: string[]): void {
+    const before = this.pages.get(pageId);
+    if (!before) return;
+    const clean = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+    this.execute({
+      label: 'Stichworte',
+      items: [],
+      pages: [{ before, after: { ...before, tags: clean, updatedAt: Date.now() } }],
+    });
   }
 
   // ---------- Seiten-Befehle ----------

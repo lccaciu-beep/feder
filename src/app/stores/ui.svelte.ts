@@ -4,6 +4,8 @@ class UiStore {
   settingsOpen = $state(false);
   /** Abschnitt, zu dem die Einstellungen beim Öffnen springen. */
   settingsSection = $state<string | null>(null);
+  /** Suchbegriff, der beim Öffnen eines Notizbuchs markiert werden soll. */
+  pendingSearch = $state<string | null>(null);
 
   openSettings(section: string | null = null) {
     this.settingsSection = section;

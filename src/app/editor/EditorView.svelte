@@ -12,6 +12,11 @@
   import CropDialog from './CropDialog.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
   import ScanDialog from '../components/ScanDialog.svelte';
+  import SearchPanel from './SearchPanel.svelte';
+  import LinkDialog from './LinkDialog.svelte';
+  import { liveQuery } from 'dexie';
+  import { toggleBookmark } from '../../storage/structure';
+  import { ui } from '../stores/ui.svelte';
   import { scanPaper } from '../../io/scan/scanPage';
   import { makePage } from '../../storage/library';
   import { insertPdfPages } from '../../pdf/import';
@@ -62,6 +67,23 @@
   let saveElementOpen = $state(false);
   let cropItem = $state.raw<ImageItem | null>(null);
   let scanOpen = $state(false);
+  let searchOpen = $state(false);
+  let searchInitial = $state('');
+  let linkOpen = $state(false);
+  const bookmarksQ = liveQuery(() => getDb().bookmarks.where('notebookId').equals(id).toArray());
+  const currentPageId = $derived(doc && st ? (pageIds[st.pageIndex] ?? null) : null);
+  const isBookmarked = $derived(
+    !!currentPageId && ($bookmarksQ ?? []).some((b) => b.pageId === currentPageId),
+  );
+
+  function toggleCurrentBookmark() {
+    if (!doc || !currentPageId || !st) return;
+    const pid = currentPageId;
+    const n = st.pageIndex + 1;
+    void toggleBookmark(doc.id, pid, `Seite ${n}`).then((on) =>
+      toasts.show(on ? `Lesezeichen auf Seite ${n} gesetzt` : 'Lesezeichen entfernt'),
+    );
+  }
 
   async function addScan(blob: Blob, width: number, height: number) {
     if (!doc || !editor) return;
@@ -90,6 +112,11 @@
           initialPage: initialPageId ? Math.max(0, d.indexOf(initialPageId)) : (initialPage ?? 0),
         });
         editor = ed;
+        if (ui.pendingSearch) {
+          searchInitial = ui.pendingSearch;
+          ui.pendingSearch = null;
+          searchOpen = true;
+        }
         cleanups.push(
           ed.onState((s) => {
             if (st && Math.abs(s.zoom - st.zoom) > 0.004) showZoom(s.zoom);
@@ -338,6 +365,12 @@
     } else if (mod && k === '0') {
       e.preventDefault();
       editor.fitWidth();
+    } else if (mod && k === 'f') {
+      e.preventDefault();
+      searchOpen = true;
+    } else if (mod && k === 'b') {
+      e.preventDefault();
+      toggleCurrentBookmark();
     } else if (mod && k === 'a') {
       e.preventDefault();
       editor.selectAll();
@@ -481,6 +514,20 @@
 
       <div class="right">
         <span class="save" class:err={st?.saveStatus === 'error'} aria-live="polite">{saveLabel}</span>
+        <button
+          class="icon-btn"
+          class:on={searchOpen}
+          onclick={() => (searchOpen = !searchOpen)}
+          aria-label="Im Notizbuch suchen (⌘F)"
+          aria-pressed={searchOpen}><Icon name="search" /></button
+        >
+        <button
+          class="icon-btn bookmark"
+          class:marked={isBookmarked}
+          onclick={toggleCurrentBookmark}
+          aria-label={isBookmarked ? 'Lesezeichen entfernen (⌘B)' : 'Lesezeichen setzen (⌘B)'}
+          aria-pressed={isBookmarked}><Icon name={isBookmarked ? 'bookmark-filled' : 'bookmark'} /></button
+        >
         <button class="icon-btn" onclick={addPage} aria-label="Seite einfügen (⌘N)"
           ><Icon name="page-plus" /></button
         >
@@ -502,6 +549,7 @@
       onsaveelement={() => (saveElementOpen = true)}
       onshareimage={() => void shareSelectionImage()}
       oncrop={() => (cropItem = selection?.single?.type === 'image' ? selection.single : null)}
+      onlink={() => (linkOpen = true)}
     />
   {/if}
 
@@ -599,6 +647,21 @@
         'Zuschneiden',
       );
     }}
+  />
+{/if}
+
+{#if searchOpen && doc && editor}
+  <SearchPanel {doc} {editor} initial={searchInitial} onclose={() => (searchOpen = false)} />
+{/if}
+
+{#if linkOpen && doc && editor}
+  {@const ed = editor}
+  <LinkDialog
+    pageCount={pageIds.length}
+    {pageIds}
+    currentNotebook={doc.id}
+    onclose={() => (linkOpen = false)}
+    oncreate={(target, label) => ed.addLink(target, label)}
   />
 {/if}
 
@@ -731,6 +794,13 @@
     margin: 0 4px;
     background: var(--line);
     flex: none;
+  }
+  .right .icon-btn.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .bookmark.marked {
+    color: #c0392b;
   }
   .save {
     font: 12px var(--font-ui);

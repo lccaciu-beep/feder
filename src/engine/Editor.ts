@@ -104,6 +104,7 @@ export class Editor implements ToolHost {
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
   private overlayDirty = false;
+  private highlights = new Map<Id, Rect[]>();
   private zoom: ZoomWindow | null = null;
   private uiInsets: Insets;
   private eventListeners = new Set<(e: EditorEvent) => void>();
@@ -1056,8 +1057,27 @@ export class Editor implements ToolHost {
     return null;
   }
 
+  /** Suchtreffer markieren (Seitenkoordinaten). Leere Map entfernt alle Markierungen. */
+  setHighlights(map: Map<Id, Rect[]>) {
+    this.highlights = map;
+    this.overlayDirty = true;
+    this.requestFrame();
+  }
+
   private drawOverlay() {
     this.overlay.clear();
+    for (const [pageId, rects] of this.highlights) {
+      for (const r of rects) {
+        const s = this.pageRectToScreen(pageId, r);
+        if (!s || s.x > this.camera.vw || s.y > this.camera.vh || s.x + s.w < 0 || s.y + s.h < 0) continue;
+        const ctx = this.overlay.screen({ x: s.x - 3, y: s.y - 3, w: s.w + 6, h: s.h + 6 });
+        ctx.fillStyle = 'rgba(255, 200, 0, 0.35)';
+        ctx.fillRect(s.x - 2, s.y - 2, s.w + 4, s.h + 4);
+        ctx.strokeStyle = 'rgba(220, 150, 0, 0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(s.x - 2, s.y - 2, s.w + 4, s.h + 4);
+      }
+    }
     if (this.zoom) {
       const r = this.pageRectToScreen(this.zoom.pageId, this.zoom.rect);
       if (r) {
@@ -1218,6 +1238,26 @@ export class Editor implements ToolHost {
       pageId,
       created.map((it) => it.id),
     );
+  }
+
+  /** Verknüpfung über der aktuellen Auswahl anlegen. */
+  addLink(target: LinkTarget, label: string) {
+    const sel = this.sel;
+    const b = selectionBounds(this.selectedItems());
+    if (!sel || !b) return;
+    const link: Item = {
+      id: newId(),
+      type: 'link',
+      pageId: sel.pageId,
+      notebookId: this.doc.id,
+      z: this.doc.topZ(sel.pageId) + 1,
+      bbox: { ...b },
+      createdAt: Date.now(),
+      target,
+      label,
+    };
+    this.clearSelection();
+    this.doc.execute({ label: 'Link', items: [{ before: null, after: link }], pages: [] });
   }
 
   insertElement(def: ElementDef) {

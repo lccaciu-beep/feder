@@ -8,7 +8,17 @@
 import { base64ToFloat32, float32ToBase64 } from '../model/codec';
 import { newId } from '../model/ids';
 import { migrate, SCHEMA_VERSION, type TableDump } from '../model/migrations';
-import type { AudioClip, BlobMeta, Bookmark, Id, Item, Notebook, OutlineEntry, Page } from '../model/types';
+import type {
+  AudioClip,
+  BlobMeta,
+  Bookmark,
+  Id,
+  Item,
+  Notebook,
+  OutlineEntry,
+  Page,
+  TextIndexEntry,
+} from '../model/types';
 import { flushAllAutosaves } from '../storage/autosave';
 import { getBlobStore } from '../storage/blobstore';
 import { getDb } from '../storage/db';
@@ -138,6 +148,7 @@ export async function exportNotebookFile(notebookId: Id): Promise<Blob> {
     items,
     bookmarks: await byNb('bookmarks'),
     outline: await byNb('outline'),
+    textIndex: await byNb('textIndex'),
     audio,
   };
   return build('notebook', tables, blobRefs(pages, items, audio), nb.title);
@@ -244,11 +255,16 @@ export async function importNotebookFile(f: FederFile, folderId: Id | null): Pro
   const bookmarks = remap<Bookmark>(f.tables.bookmarks);
   const outline = remap<OutlineEntry>(f.tables.outline);
   const audio = ((f.tables.audio ?? []) as AudioClip[]).map((a) => ({ ...a, id: newId(), notebookId: nbId }));
+  const textIndex = remap<TextIndexEntry>(f.tables.textIndex).map((r) => ({
+    ...r,
+    id: `${r.pageId}:${r.source}`,
+  }));
   const db = getDb();
   await db.transaction(
     'rw',
-    [db.notebooks, db.pages, db.items, db.bookmarks, db.outline, db.audio],
+    [db.notebooks, db.pages, db.items, db.bookmarks, db.outline, db.audio, db.textIndex],
     async () => {
+      await db.textIndex.bulkPut(textIndex);
       await db.notebooks.add(notebook);
       await db.pages.bulkAdd(pages);
       await db.items.bulkAdd(items);

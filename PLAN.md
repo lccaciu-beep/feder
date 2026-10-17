@@ -1,6 +1,6 @@
 # Feder – Umsetzungsplan
 
-Stand: 17.10.2026 · Status: **Phasen 1–3 abgeschlossen**
+Stand: 17.10.2026 · Status: **Phasen 1–4 abgeschlossen**
 
 > Bestätigt am 17.10.2026: E1 Svelte 5 · E2 alle Pakete aus §9 · E3 mkcert ·
 > E4 öffentliches Repo `feder` mit GitHub Pages. E5–E7 gelten als Empfehlung, solange du nicht widersprichst.
@@ -454,14 +454,16 @@ iPad-Prüfliste an dich.
 - [ ] Große PDFs (500+ Seiten): Import liest Größen/Links/Text sequenziell – auf dem iPad messen
 - [x] Tests: Homographie, Entzerrung, Suchtext, Routen; E2E: PDF-Link, Scan, eigene Vorlage
 
-### Phase 4 – Suche & Struktur
-- [ ] Suchindex: PDF-Text, Textboxen, Titel, Tags, Lesezeichen; normalisiert (Umlaute/ß)
-- [ ] Globale Suche + Suche im Notizbuch mit Trefferhervorhebung (PDF-Textrechtecke)
-- [ ] Outline (aus PDF übernehmen + eigene Einträge), Lesezeichen
-- [ ] Hyperlinks: URL, Seite, anderes Notizbuch
-- [ ] Tags pro Seite, Tag-Filter
-- [ ] **Bericht Handschrifterkennung** → deine Entscheidung
-- [ ] Tests: Index-Aufbau, Normalisierung, Link-Auflösung
+### Phase 4 – Suche & Struktur ✅
+- [x] Suchindex: PDF-Text (beim Import), Textfelder (automatisch, auch bei Undo), Titel; normalisiert (Umlaute/ß/Akzente), Wortanfänge
+- [x] Suche in der Bibliothek (Titel + Inhalte, gruppiert nach Notizbuch) und im Notizbuch (⌘F) mit Trefferliste
+- [x] Trefferhervorhebung auf PDF-Seiten (Textpositionen aus pdf.js) und in Textfeldern
+- [x] Gliederung: PDF-Inhaltsverzeichnis wird übernommen, eigene Einträge, einrücken/ausrücken, umbenennen
+- [x] Lesezeichen (Leiste ⌘B, Seitenmenü), Liste in der Seitenleiste
+- [x] Hyperlinks: Webseite, Seite, anderes Notizbuch – über einer Lasso-Auswahl; Finger-Tipp öffnet
+- [x] Stichworte pro Seite, in Suche und Seitenleiste sichtbar, als Filter-Chips in der Notizbuchsuche
+- [x] **Bericht Handschrifterkennung** → [docs/handschrifterkennung.md](docs/handschrifterkennung.md) – **Entscheidung offen**
+- [x] Tests: Suche (Phrase, Wortanfang, Umlaute), Index für Textfelder inkl. Undo; E2E: Notizbuchsuche, Bibliothekssuche, Lesezeichen, Link
 
 ### Phase 5 – Erweiterungen
 - [ ] Audio: Aufnahme (MediaRecorder, `audio/mp4`), Striche mit `t0`, synchrones Hervorheben bei Wiedergabe, Strich antippen → Sprung

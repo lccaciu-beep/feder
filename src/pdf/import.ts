@@ -4,25 +4,40 @@
 
 import type { NotebookDoc } from '../engine/doc/NotebookDoc';
 import { newId } from '../model/ids';
-import type { CoverSpec, Id, LinkItem, Notebook, Page, PaperSpec, TextIndexEntry } from '../model/types';
+import type {
+  CoverSpec,
+  Id,
+  LinkItem,
+  Notebook,
+  OutlineEntry,
+  Page,
+  PaperSpec,
+  TextIndexEntry,
+} from '../model/types';
 import { getBlobStore } from '../storage/blobstore';
 import { getDb } from '../storage/db';
 import { createNotebook, makePage } from '../storage/library';
 import { tokenize } from '../search/text';
-import { analyzePdf, openPdfBytes, type PdfPageInfo } from './pdfjs';
+import { analyzePdf, openPdfBytes, pdfOutline, type PdfPageInfo } from './pdfjs';
 
 export function isPdfFile(f: File): boolean {
   return f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
 }
 
 /** Speichert das PDF und liefert Papier und Seiteninfos. */
-async function storePdf(file: File): Promise<{ papers: PaperSpec[]; infos: PdfPageInfo[] }> {
+type OutlineRow = { title: string; level: number; pageIndex: number };
+
+async function storePdf(
+  file: File,
+): Promise<{ papers: PaperSpec[]; infos: PdfPageInfo[]; outline: OutlineRow[] }> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   // pdf.js übernimmt den Puffer in den Worker – deshalb mit einer Kopie arbeiten.
   const doc = await openPdfBytes(bytes.slice());
   let infos: PdfPageInfo[];
+  let outline: OutlineRow[];
   try {
     infos = await analyzePdf(doc);
+    outline = await pdfOutline(doc);
   } finally {
     void doc.loadingTask.destroy();
   }
@@ -34,11 +49,17 @@ async function storePdf(file: File): Promise<{ papers: PaperSpec[]; infos: PdfPa
     color: 'white',
     template: { kind: 'pdf', blobId: meta.id, pageIndex },
   }));
-  return { papers, infos };
+  return { papers, infos, outline };
 }
 
 /** Links und Suchtext der PDF-Seiten als Datensätze. */
-function derived(notebookId: Id, pages: Page[], infos: PdfPageInfo[]) {
+function derived(
+  notebookId: Id,
+  pages: Page[],
+  infos: PdfPageInfo[],
+  outline: OutlineRow[] = [],
+  orderBase = 0,
+) {
   const links: LinkItem[] = [];
   const index: TextIndexEntry[] = [];
   const now = Date.now();
@@ -76,14 +97,24 @@ function derived(notebookId: Id, pages: Page[], infos: PdfPageInfo[]) {
       });
     }
   });
-  return { links, index };
+  const toc: OutlineEntry[] = outline
+    .filter((o) => pages[o.pageIndex])
+    .map((o, i) => ({
+      id: newId(),
+      notebookId,
+      pageId: pages[o.pageIndex]!.id,
+      title: o.title,
+      level: o.level,
+      order: orderBase + i,
+    }));
+  return { links, index, toc };
 }
 
 const PDF_COVER: CoverSpec = { color: '#6b7280', pattern: 'plain' };
 
 /** Legt aus einem PDF ein neues Notizbuch an. */
 export async function importPdfAsNotebook(file: File, folderId: Id | null): Promise<Notebook> {
-  const { papers, infos } = await storePdf(file);
+  const { papers, infos, outline } = await storePdf(file);
   const title = file.name.replace(/\.pdf$/i, '').trim() || 'PDF';
   const nb = await createNotebook({
     title,
@@ -95,23 +126,25 @@ export async function importPdfAsNotebook(file: File, folderId: Id | null): Prom
   const db = getDb();
   const pageMap = new Map((await db.pages.where('notebookId').equals(nb.id).toArray()).map((p) => [p.id, p]));
   const pages = nb.pageIds.map((id) => pageMap.get(id)!);
-  const { links, index } = derived(nb.id, pages, infos);
-  await db.transaction('rw', db.items, db.textIndex, async () => {
+  const { links, index, toc } = derived(nb.id, pages, infos, outline);
+  await db.transaction('rw', db.items, db.textIndex, db.outline, async () => {
     await db.items.bulkAdd(links);
     await db.textIndex.bulkPut(index);
+    await db.outline.bulkAdd(toc);
   });
   return nb;
 }
 
 /** Fügt die Seiten eines PDFs an `index` in ein geöffnetes Notizbuch ein (rückgängig machbar). */
 export async function insertPdfPages(doc: NotebookDoc, file: File, index: number): Promise<Page[]> {
-  const { papers, infos } = await storePdf(file);
+  const { papers, infos, outline } = await storePdf(file);
   const now = Date.now();
   const pages = papers.map((p) => makePage(doc.id, p, now));
   doc.insertPages(index, pages, 'PDF einfügen');
-  const { links, index: text } = derived(doc.id, pages, infos);
+  const { links, index: text, toc } = derived(doc.id, pages, infos, outline, Date.now());
   if (links.length)
     doc.execute({ label: 'PDF-Links', items: links.map((after) => ({ before: null, after })), pages: [] });
   await getDb().textIndex.bulkPut(text);
+  await getDb().outline.bulkAdd(toc);
   return pages;
 }

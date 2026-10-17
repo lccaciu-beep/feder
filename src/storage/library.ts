@@ -131,48 +131,68 @@ export async function touchOpened(id: Id): Promise<void> {
 /** Kopiert ein Notizbuch mit allen Seiten und Inhalten (neue IDs). */
 export async function duplicateNotebook(id: Id, targetFolder?: Id | null, title?: string): Promise<Notebook> {
   const db = getDb();
-  return db.transaction('rw', db.notebooks, db.pages, db.items, async () => {
-    const src = await db.notebooks.get(id);
-    if (!src) throw new Error('Notizbuch nicht gefunden.');
-    const now = Date.now();
-    const newNbId = newId(now);
-    const pageMap = new Map<Id, Id>();
-    const pages = await db.pages.where('notebookId').equals(id).toArray();
-    const newPages = pages.map((p) => {
-      const np: Page = {
-        ...structuredClone(p),
+  return db.transaction(
+    'rw',
+    [db.notebooks, db.pages, db.items, db.textIndex, db.bookmarks, db.outline],
+    async () => {
+      const src = await db.notebooks.get(id);
+      if (!src) throw new Error('Notizbuch nicht gefunden.');
+      const now = Date.now();
+      const newNbId = newId(now);
+      const pageMap = new Map<Id, Id>();
+      const pages = await db.pages.where('notebookId').equals(id).toArray();
+      const newPages = pages.map((p) => {
+        const np: Page = {
+          ...structuredClone(p),
+          id: newId(),
+          notebookId: newNbId,
+          createdAt: now,
+          updatedAt: now,
+        };
+        pageMap.set(p.id, np.id);
+        return np;
+      });
+      const items = await db.items.where('notebookId').equals(id).toArray();
+      const newItems: Item[] = items.map((it) => ({
+        ...structuredClone(it),
         id: newId(),
         notebookId: newNbId,
+        pageId: pageMap.get(it.pageId) ?? it.pageId,
+      }));
+      const copy: Notebook = {
+        ...structuredClone(src),
+        id: newNbId,
+        folderId: targetFolder === undefined ? src.folderId : targetFolder,
+        title: title ?? `${src.title} (Kopie)`,
+        pageIds: src.pageIds.map((pid) => pageMap.get(pid)).filter((x): x is Id => !!x),
+        favorite: 0,
         createdAt: now,
         updatedAt: now,
+        openedAt: null,
+        deletedAt: null,
       };
-      pageMap.set(p.id, np.id);
-      return np;
-    });
-    const items = await db.items.where('notebookId').equals(id).toArray();
-    const newItems: Item[] = items.map((it) => ({
-      ...structuredClone(it),
-      id: newId(),
-      notebookId: newNbId,
-      pageId: pageMap.get(it.pageId) ?? it.pageId,
-    }));
-    const copy: Notebook = {
-      ...structuredClone(src),
-      id: newNbId,
-      folderId: targetFolder === undefined ? src.folderId : targetFolder,
-      title: title ?? `${src.title} (Kopie)`,
-      pageIds: src.pageIds.map((pid) => pageMap.get(pid)).filter((x): x is Id => !!x),
-      favorite: 0,
-      createdAt: now,
-      updatedAt: now,
-      openedAt: null,
-      deletedAt: null,
-    };
-    await db.notebooks.add(copy);
-    await db.pages.bulkAdd(newPages);
-    await db.items.bulkAdd(newItems);
-    return copy;
-  });
+      await db.notebooks.add(copy);
+      await db.pages.bulkAdd(newPages);
+      await db.items.bulkAdd(newItems);
+      // Suchindex, Lesezeichen und Gliederung mitkopieren
+      const remap = <T extends { pageId: Id }>(rows: T[]) =>
+        rows
+          .filter((r) => pageMap.has(r.pageId))
+          .map((r) => ({ ...r, notebookId: newNbId, pageId: pageMap.get(r.pageId)! }));
+      const index = await db.textIndex.where('notebookId').equals(id).toArray();
+      await db.textIndex.bulkPut(remap(index).map((r) => ({ ...r, id: `${r.pageId}:${r.source}` })));
+      await db.bookmarks.bulkAdd(
+        remap(await db.bookmarks.where('notebookId').equals(id).toArray()).map((r) => ({
+          ...r,
+          id: newId(),
+        })),
+      );
+      await db.outline.bulkAdd(
+        remap(await db.outline.where('notebookId').equals(id).toArray()).map((r) => ({ ...r, id: newId() })),
+      );
+      return copy;
+    },
+  );
 }
 
 /** Kopiert einen Ordner rekursiv mit allen Unterordnern und Notizbüchern. */

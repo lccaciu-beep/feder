@@ -10,12 +10,14 @@
     onsaveelement,
     onshareimage,
     oncrop,
+    onlink,
   }: {
     editor: Editor;
     info: SelectionInfo;
     onsaveelement: () => void;
     onshareimage: () => void;
     oncrop: () => void;
+    onlink: () => void;
   } = $props();
 
   let colors = $state(false);
@@ -36,6 +38,7 @@
       { label: 'Duplizieren', icon: 'copy', run: () => editor.duplicateSelection() },
       { label: 'Als Bild teilen …', icon: 'share', run: onshareimage },
       { label: 'Als Element speichern …', icon: 'sticker', run: onsaveelement },
+      { label: 'Link hinzufügen …', icon: 'link', run: onlink },
     ];
     const single = info.single;
     if (single?.type === 'image') {

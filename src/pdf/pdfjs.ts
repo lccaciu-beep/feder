@@ -164,3 +164,69 @@ export async function analyzePdf(doc: PDFDocumentProxy): Promise<PdfPageInfo[]> 
   }
   return out;
 }
+
+/** Inhaltsverzeichnis (Lesezeichen) eines PDFs, flach mit Ebene. */
+export async function pdfOutline(
+  doc: PDFDocumentProxy,
+): Promise<{ title: string; level: number; pageIndex: number }[]> {
+  const out: { title: string; level: number; pageIndex: number }[] = [];
+  let tree: Awaited<ReturnType<PDFDocumentProxy['getOutline']>> | null = null;
+  try {
+    tree = await doc.getOutline();
+  } catch {
+    return out;
+  }
+  const walk = async (nodes: NonNullable<typeof tree>, level: number) => {
+    for (const n of nodes) {
+      let dest = n.dest as unknown;
+      if (typeof dest === 'string') dest = await doc.getDestination(dest).catch(() => null);
+      if (Array.isArray(dest) && dest[0] != null) {
+        const ref = dest[0];
+        const pageIndex =
+          typeof ref === 'number'
+            ? ref
+            : await doc.getPageIndex(ref as Parameters<typeof doc.getPageIndex>[0]).catch(() => -1);
+        if (pageIndex >= 0 && n.title)
+          out.push({ title: n.title.trim(), level: Math.min(level, 4), pageIndex });
+      }
+      if (n.items?.length) await walk(n.items as NonNullable<typeof tree>, level + 1);
+      if (out.length > 2000) return;
+    }
+  };
+  if (tree) await walk(tree, 0);
+  return out;
+}
+
+/** Rechtecke (pt, Anzeige) aller Stellen auf einer PDF-Seite, die `query` enthalten. */
+export async function pdfTextRects(
+  blobId: Id,
+  pageIndex: number,
+  query: string,
+  norm: (s: string) => string,
+): Promise<Rect[]> {
+  const doc = await pdfFor(blobId);
+  const page = await doc.getPage(pageIndex + 1);
+  const vp = page.getViewport({ scale: 1 });
+  const tc = await page.getTextContent();
+  const nq = norm(query);
+  const out: Rect[] = [];
+  if (!nq) return out;
+  for (const it of tc.items) {
+    if (!('str' in it) || !it.str) continue;
+    const n = norm(it.str);
+    const tr = it.transform as number[];
+    const h = it.height || Math.hypot(tr[2]!, tr[3]!);
+    let from = 0;
+    let i: number;
+    while ((i = n.indexOf(nq, from)) >= 0) {
+      from = i + nq.length;
+      const x0 = tr[4]! + (it.width * i) / n.length;
+      const x1 = tr[4]! + (it.width * (i + nq.length)) / n.length;
+      const [ax, ay] = vp.convertToViewportPoint(x0, tr[5]! - h * 0.2) as [number, number];
+      const [bx, by] = vp.convertToViewportPoint(x1, tr[5]! + h * 0.9) as [number, number];
+      out.push({ x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) });
+    }
+  }
+  page.cleanup();
+  return out;
+}

@@ -16,6 +16,7 @@
   import { lastBackupAt } from '../../io/backup';
   import { ui } from '../stores/ui.svelte';
   import { onMount } from 'svelte';
+  import { hitLabel, searchContent, type Hit } from '../../search/query';
   import { press } from './press';
   import { router, type Route } from '../stores/router.svelte';
   import { settings } from '../stores/settings.svelte';
@@ -34,6 +35,39 @@
   let notebooks = $derived<Notebook[]>($notebooksQ ?? []);
 
   let query = $state('');
+  let contentHits = $state.raw<Hit[]>([]);
+  let searchSeq = 0;
+
+  $effect(() => {
+    const q = query.trim();
+    const my = ++searchSeq;
+    if (q.length < 2) {
+      contentHits = [];
+      return;
+    }
+    const t = setTimeout(() => {
+      void searchContent(q, { limit: 120 }).then((h) => {
+        if (my === searchSeq) contentHits = h;
+      });
+    }, 250);
+    return () => clearTimeout(t);
+  });
+
+  /** Treffer nach Notizbuch gruppiert */
+  const hitGroups = $derived.by(() => {
+    const groups = new Map<string, { title: string; notebookId: string; hits: Hit[] }>();
+    for (const h of contentHits) {
+      let g = groups.get(h.notebookId);
+      if (!g) groups.set(h.notebookId, (g = { title: h.notebookTitle, notebookId: h.notebookId, hits: [] }));
+      g.hits.push(h);
+    }
+    return [...groups.values()];
+  });
+
+  function openHit(h: Hit) {
+    ui.pendingSearch = query.trim();
+    router.go({ name: 'notebook', id: h.notebookId, pageId: h.pageId });
+  }
   let searchEl = $state<HTMLInputElement>();
   let selecting = $state(false);
   let selected = $state<Set<string>>(new Set());
@@ -614,7 +648,24 @@
   </header>
 
   <main class="content" class:list={listMode}>
-    {#if isEmpty}
+    {#if query.trim().length >= 2 && hitGroups.length}
+      <section class="hits" aria-label="Treffer in Inhalten">
+        <h2>In Inhalten</h2>
+        {#each hitGroups as g (g.notebookId)}
+          <div class="hit-group">
+            <h3>{g.title}</h3>
+            {#each g.hits.slice(0, 8) as h, i (i)}
+              <button class="hit" onclick={() => openHit(h)}>
+                <span class="where">Seite {h.pageIndex + 1}, {hitLabel(h.kind)}</span>
+                <span class="snip">{h.snippet}</span>
+              </button>
+            {/each}
+            {#if g.hits.length > 8}<p class="more-hits">und {g.hits.length - 8} weitere</p>{/if}
+          </div>
+        {/each}
+      </section>
+    {/if}
+    {#if isEmpty && !(query.trim().length >= 2 && hitGroups.length)}
       <div class="empty">
         {#if query}
           <p>Nichts gefunden für „{query}“.</p>
@@ -1029,6 +1080,48 @@
     transform: translateY(-50%);
   }
 
+  .hits {
+    margin-bottom: 28px;
+    max-width: 760px;
+  }
+  .hits h2 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .hit-group {
+    margin-bottom: 14px;
+  }
+  .hit-group h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .hit {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    text-align: left;
+  }
+  .hit:hover,
+  .hit:focus-visible {
+    background: var(--surface);
+  }
+  .hit .where {
+    font: 600 13px var(--font-ui);
+    color: var(--accent);
+  }
+  .hit .snip {
+    font: 14px/1.35 var(--font-ui);
+  }
+  .more-hits {
+    margin: 2px 10px;
+    font: 13px var(--font-ui);
+    color: var(--muted);
+  }
   .empty {
     display: flex;
     flex-direction: column;

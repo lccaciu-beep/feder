@@ -76,6 +76,14 @@
     flashcard:
       '<rect x="3.5" y="6" width="14" height="11" rx="1.5"/><path d="M7 3.5h12a1.5 1.5 0 011.5 1.5v9"/>',
     select: '<path d="M4 4h4M12 4h4M20 4v4M20 12v4M20 20h-4M12 20H8M4 20v-4M4 12V8"/>',
+    bookmark: '<path d="M7 3.5h10a1 1 0 011 1V20l-6-3.8L6 20V4.5a1 1 0 011-1z"/>',
+    'bookmark-filled':
+      '<path fill="currentColor" d="M7 3.5h10a1 1 0 011 1V20l-6-3.8L6 20V4.5a1 1 0 011-1z"/>',
+    link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1.2-1.2"/>',
+    tag: '<path d="M3.5 12.3V4.5a1 1 0 011-1h7.8l8.2 8.2a1.5 1.5 0 010 2.1l-6.7 6.7a1.5 1.5 0 01-2.1 0z"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/>',
+    outline: '<path d="M5 6h14M8 10h11M8 14h11M5 18h14"/>',
+    indent: '<path d="M4 6h16M10 10h10M10 14h10M4 18h16M4 9.5l3 2.5-3 2.5"/>',
+    outdent: '<path d="M4 6h16M10 10h10M10 14h10M4 18h16M7 9.5L4 12l3 2.5"/>',
     share:
       '<path d="M12 15V3.5M8 7.5l4-4 4 4"/><path d="M7.5 11H6a2 2 0 00-2 2v6a2 2 0 002 2h12a2 2 0 002-2v-6a2 2 0 00-2-2h-1.5"/>',
     download: '<path d="M12 4v11.5M8 11.5l4 4 4-4"/><path d="M5 20h14"/>',
