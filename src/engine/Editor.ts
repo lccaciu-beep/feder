@@ -3,7 +3,18 @@
 // nur über diese Klasse mit der Engine.
 
 import type { AppSettings } from '../model/settings';
-import type { Id, Item, PressureMode, Rect } from '../model/types';
+import { newId } from '../model/ids';
+import type {
+  ElementDef,
+  Id,
+  ImageItem,
+  Item,
+  PressureMode,
+  Rect,
+  TextItem,
+  TextStyle,
+} from '../model/types';
+import { getBlobStore } from '../storage/blobstore';
 import type { SaveStatus } from '../storage/autosave';
 import type { DocChange, NotebookDoc } from './doc/NotebookDoc';
 import { isHighlighter } from './ink/brushes';
@@ -15,10 +26,42 @@ import { LiveLayer } from './render/LiveLayer';
 import { PageView, chooseLevel } from './render/PageView';
 import { EraserTool } from './tools/EraserTool';
 import { InkTool } from './tools/InkTool';
-import type { Sample, Tool, ToolHost } from './tools/types';
+import { LassoTool, selectionBounds } from './tools/LassoTool';
+import { LaserTool } from './tools/LaserTool';
+import { TapeTool, toggleTapeAt } from './tools/TapeTool';
+import { TextTool, tapText } from './tools/TextTool';
+import { fitText } from './tools/factory';
+import type { SelectionHandle, SelectionState, Sample, Tool, ToolHost } from './tools/types';
+import { itemBBox, itemInPolygon, transformItem, translate, type Sim } from './geometry/transform';
+import { drawItems, onImageLoaded } from './render/items';
+import { ZoomWindow } from './ZoomWindow';
 import { Camera, layoutPages, type CameraState, type Insets, type Layout, type PageBox } from './view/camera';
 
-export type ToolId = 'pen' | 'highlighter' | 'eraser';
+export type ToolId = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'text' | 'tape' | 'laser';
+
+export interface SelectionInfo {
+  pageId: Id;
+  count: number;
+  /** Bildschirm-Rechteck der Auswahl (CSS-px, relativ zum Editor) */
+  screen: Rect;
+  /** Das einzige ausgewählte Element, falls genau eins */
+  single: Item | null;
+}
+
+export interface TextEditInfo {
+  item: TextItem;
+  isNew: boolean;
+  /** Bildschirm-Rechteck des (ungedrehten) Textfelds */
+  screen: Rect;
+  /** CSS-px pro pt */
+  scale: number;
+}
+
+export type EditorEvent =
+  | { type: 'selection'; info: SelectionInfo | null }
+  | { type: 'textEdit'; info: TextEditInfo | null }
+  | { type: 'lassoOffer'; info: { x: number; y: number } | null }
+  | { type: 'zoomWindow'; info: { height: number } | null };
 
 export interface EditorState {
   tool: ToolId;
@@ -47,7 +90,20 @@ type PointerWithAngles = PointerEvent & { altitudeAngle?: number; azimuthAngle?:
 export class Editor implements ToolHost {
   readonly camera = new Camera();
   readonly live: LiveLayer;
+  private readonly overlay: LiveLayer;
   settings: AppSettings;
+  private sel: SelectionState | null = null;
+  private textEdit: { item: TextItem; isNew: boolean } | null = null;
+  private lassoOffer: {
+    pageId: Id;
+    polygon: number[];
+    strokeId: Id;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+  private overlayDirty = false;
+  private zoom: ZoomWindow | null = null;
+  private uiInsets: Insets;
+  private eventListeners = new Set<(e: EditorEvent) => void>();
   private readonly world: HTMLDivElement;
   private views = new Map<Id, PageView>();
   private layout: Layout = layoutPages([], 'vertical');
@@ -91,15 +147,23 @@ export class Editor implements ToolHost {
   ) {
     this.settings = settings;
     this.insets = opts.insets ?? { top: 0, right: 0, bottom: 0, left: 0 };
+    this.uiInsets = this.insets;
     root.classList.add('feder-editor');
     this.world = document.createElement('div');
     this.world.className = 'feder-world';
     root.appendChild(this.world);
     this.live = new LiveLayer(root);
+    this.overlay = new LiveLayer(root);
+    this.overlay.canvas.classList.add('feder-overlay');
     this.tools = {
       pen: new InkTool(this, 'pen'),
       highlighter: new InkTool(this, 'highlighter'),
       eraser: new EraserTool(this),
+      lasso: new LassoTool(this),
+      shape: new InkTool(this, 'shape'),
+      text: new TextTool(this),
+      tape: new TapeTool(this),
+      laser: new LaserTool(this),
     };
     this.gestures = new TouchGestures({
       onStart: () => this.stopMotion(),
@@ -110,7 +174,8 @@ export class Editor implements ToolHost {
         this.invalidateCamera();
       },
       onEnd: (vx, vy) => this.onGestureEnd(vx, vy),
-      onTap: (n) => {
+      onTap: (n, x, y) => {
+        if (n === 1) this.onFingerTap(x, y);
         if (!this.settings.tapGestures) return;
         if (n === 2) this.undo();
         else if (n === 3) this.redo();
@@ -130,6 +195,7 @@ export class Editor implements ToolHost {
     this.listen(root, 'gesturestart', (e: Event) => e.preventDefault());
 
     this.disposers.push(doc.on((c) => this.onDocChange(c)));
+    this.disposers.push(onImageLoaded((blobId) => this.onImageLoaded(blobId)));
     this.disposers.push(doc.autosave.onStatus(() => this.emit()));
 
     this.resizeObserver = new ResizeObserver(() => this.onResize());
@@ -165,8 +231,19 @@ export class Editor implements ToolHost {
   setTool(id: ToolId) {
     if (this.toolId === id) return;
     this.tools[this.toolId].cancel();
+    this.finishTextEdit();
+    if (id !== 'lasso') this.clearSelection();
     this.toolId = id;
     this.emit();
+  }
+
+  onEvent(cb: (e: EditorEvent) => void): () => void {
+    this.eventListeners.add(cb);
+    return () => this.eventListeners.delete(cb);
+  }
+
+  private fire(e: EditorEvent) {
+    for (const cb of this.eventListeners) cb(e);
   }
 
   updateSettings(s: AppSettings) {
@@ -184,18 +261,71 @@ export class Editor implements ToolHost {
 
   setInsets(insets: Insets) {
     const prevTop = this.insets.top;
-    this.insets = insets;
+    this.uiInsets = insets;
+    this.insets = { ...insets, bottom: insets.bottom + this.zoomHeight() };
     this.onResize(prevTop);
+  }
+
+  // ---------- Zoom-Fenster ----------
+
+  get toolName(): string {
+    return this.toolId;
+  }
+
+  get zoomWindowOpen(): boolean {
+    return !!this.zoom;
+  }
+
+  private zoomHeight(): number {
+    return this.zoom ? Math.round(Math.min(260, this.camera.vh * 0.32)) : 0;
+  }
+
+  openZoomWindow() {
+    if (this.zoom) return;
+    const pageId = this.doc.pageIds[this.currentPageIndex()];
+    const box = pageId ? this.boxes.get(pageId) : undefined;
+    if (!pageId || !box) return;
+    this.zoom = new ZoomWindow(this, this.root);
+    this.setInsets(this.uiInsets);
+    const vis = intersection(box, this.camera.visibleWorld()) ?? box;
+    const w = box.w * 0.45;
+    this.zoom.setRect(pageId, { x: box.w * 0.06, y: vis.y - box.y + vis.h * 0.3, w, h: w / 4 });
+    this.fire({ type: 'zoomWindow', info: { height: this.zoomHeight() } });
+  }
+
+  closeZoomWindow() {
+    if (!this.zoom) return;
+    this.zoom.destroy();
+    this.zoom = null;
+    this.setInsets(this.uiInsets);
+    this.overlayDirty = true;
+    this.requestFrame();
+    this.fire({ type: 'zoomWindow', info: null });
+  }
+
+  zoomWindowAdvance() {
+    this.zoom?.advance();
+  }
+
+  zoomWindowNewLine() {
+    this.zoom?.newLine();
+  }
+
+  onZoomRectChanged() {
+    this.overlayDirty = true;
+    this.requestFrame();
   }
 
   undo() {
     this.cancelActiveTool();
+    this.finishTextEdit();
     this.doc.undo();
     this.emit();
   }
 
   redo() {
     this.cancelActiveTool();
+    this.finishTextEdit();
     this.doc.redo();
     this.emit();
   }
@@ -264,6 +394,9 @@ export class Editor implements ToolHost {
     for (const v of this.views.values()) v.destroy();
     this.views.clear();
     this.live.destroy();
+    this.overlay.destroy();
+    this.zoom?.destroy();
+    if (this.lassoOffer) clearTimeout(this.lassoOffer.timer);
     this.world.remove();
     this.debugEl?.remove();
     this.root.classList.remove('feder-editor');
@@ -352,6 +485,13 @@ export class Editor implements ToolHost {
     this.dpr = window.devicePixelRatio || 1;
     this.camera.setViewport(r.width, r.height, this.insets);
     this.live.resize(r.width, r.height, this.dpr);
+    this.overlay.resize(r.width, r.height, this.dpr);
+    this.overlayDirty = true;
+    if (this.zoom) {
+      const zh = this.zoomHeight();
+      this.zoom.el.style.height = `${zh}px`;
+      this.zoom.resize(r.width, zh, this.dpr);
+    }
   }
 
   /** Hält beim Größenwechsel den Punkt oben in der Mitte an seiner Stelle. */
@@ -384,6 +524,12 @@ export class Editor implements ToolHost {
       this.updateViews();
       this.scheduleSettle();
       this.emit();
+      this.overlayDirty = true;
+      this.emitPositions();
+    }
+    if (this.overlayDirty) {
+      this.overlayDirty = false;
+      this.drawOverlay();
     }
     const tool = this.tools[this.toolId];
     if (tool.active) tool.frame(now);
@@ -491,6 +637,13 @@ export class Editor implements ToolHost {
       }
       this.relayout();
       this.scheduleSettle();
+    }
+    if (this.sel) {
+      const items = this.doc.getItems(this.sel.pageId) ?? [];
+      const alive = new Set(items.map((it) => it.id));
+      for (const id of [...this.sel.ids]) if (!alive.has(id)) this.sel.ids.delete(id);
+      if (!this.sel.ids.size || !this.doc.pages.has(this.sel.pageId)) this.clearSelection();
+      else this.selectionChanged();
     }
     for (const [pageId, ch] of c.items) {
       const view = this.views.get(pageId);
@@ -638,7 +791,12 @@ export class Editor implements ToolHost {
     }
     const s = this.sample(e);
     const box = this.hitPage(s.sx, s.sy);
-    if (!box) return false;
+    if (!box && this.toolId !== 'laser') {
+      if (this.toolId === 'lasso') this.clearSelection();
+      return false;
+    }
+    this.dismissLassoOffer();
+    if (this.textEdit) this.finishTextEdit();
     this.activePointer = e.pointerId;
     this.activeType = e.pointerType;
     try {
@@ -647,7 +805,7 @@ export class Editor implements ToolHost {
       /* synthetische Events haben keinen echten Pointer */
     }
     if (e.pointerType === 'pen' && e.pressure > 0) this.pressure.add(e.pressure);
-    this.tools[this.toolId].begin(s, box.id);
+    this.tools[this.toolId].begin(s, box?.id ?? '');
     this.requestFrame();
     return true;
   }
@@ -680,6 +838,13 @@ export class Editor implements ToolHost {
     if (this.activePointer !== null) {
       this.ignored.add(id);
       return;
+    }
+    // Auswahl mit dem Finger verschieben, skalieren oder drehen
+    if (this.toolId === 'lasso' && !this.gestures.count && this.selectionHandleAt(s.sx, s.sy)) {
+      if (this.startDrawing(e)) {
+        this.finger = { id, t, sx: s.sx, sy: s.sy };
+        return;
+      }
     }
     this.beginGesture(id, s.sx, s.sy, t);
   }
@@ -751,6 +916,435 @@ export class Editor implements ToolHost {
     this.finger = null;
   }
 
+  // ---------- Finger-Tipp ----------
+
+  private onFingerTap(sx: number, sy: number) {
+    const box = this.hitPage(sx, sy);
+    if (!box) return;
+    const [wx, wy] = this.camera.toWorld(sx, sy);
+    if (this.zoom) {
+      const r = this.zoom.rect;
+      this.zoom.setRect(box.id, { ...r, x: wx - box.x - r.w * 0.1, y: wy - box.y - r.h / 2 });
+      return;
+    }
+    if (toggleTapeAt(this, box.id, wx - box.x, wy - box.y)) return;
+    if (this.toolId === 'text') {
+      tapText(this, box.id, box, { sx, sy, pressure: 0.5, t: performance.now(), pointerType: 'touch' });
+      return;
+    }
+    if (this.toolId === 'lasso' && this.sel && !this.selectionHandleAt(sx, sy)) this.clearSelection();
+  }
+
+  // ---------- Auswahl ----------
+
+  get selection(): SelectionState | null {
+    return this.sel;
+  }
+
+  setSelection(pageId: Id, ids: Iterable<Id>) {
+    const set = new Set(ids);
+    this.sel = set.size ? { pageId, ids: set, preview: null } : null;
+    this.selectionChanged();
+  }
+
+  clearSelection() {
+    if (!this.sel) return;
+    this.sel = null;
+    this.selectionChanged();
+  }
+
+  setSelectionPreview(t: Sim | null) {
+    if (!this.sel) return;
+    this.sel.preview = t;
+    this.overlayDirty = true;
+    this.requestFrame();
+  }
+
+  /** Alle Elemente der aktuellen Seite auswählen. */
+  selectAll() {
+    const pageId = this.doc.pageIds[this.currentPageIndex()];
+    if (!pageId) return;
+    const items = this.doc.getItems(pageId) ?? [];
+    if (!items.length) return;
+    if (this.toolId !== 'lasso') this.setTool('lasso');
+    this.setSelection(
+      pageId,
+      items.map((it) => it.id),
+    );
+  }
+
+  selectedItems(): Item[] {
+    const sel = this.sel;
+    if (!sel) return [];
+    return (this.doc.getItems(sel.pageId) ?? []).filter((it) => sel.ids.has(it.id));
+  }
+
+  private selectionChanged() {
+    this.overlayDirty = true;
+    this.requestFrame();
+    this.fire({ type: 'selection', info: this.selectionInfo() });
+  }
+
+  private pageRectToScreen(pageId: Id, r: Rect): Rect | null {
+    const box = this.boxes.get(pageId);
+    if (!box) return null;
+    const [x, y] = this.camera.toScreen(box.x + r.x, box.y + r.y);
+    return { x, y, w: r.w * this.camera.scale, h: r.h * this.camera.scale };
+  }
+
+  selectionInfo(): SelectionInfo | null {
+    const sel = this.sel;
+    if (!sel) return null;
+    const items = this.selectedItems();
+    const b = selectionBounds(items, sel.preview);
+    const screen = b && this.pageRectToScreen(sel.pageId, b);
+    if (!screen) return null;
+    return { pageId: sel.pageId, count: items.length, screen, single: items.length === 1 ? items[0]! : null };
+  }
+
+  private handles(): {
+    rect: Rect;
+    rotate: [number, number];
+    scale: [number, number];
+    vertices: [number, number][];
+  } | null {
+    const info = this.selectionInfo();
+    if (!info) return null;
+    const r = info.screen;
+    const vertices: [number, number][] = [];
+    const single = info.single;
+    if (single?.type === 'shape' && single.shape !== 'ellipse' && !this.sel?.preview) {
+      const box = this.boxes.get(info.pageId)!;
+      for (let i = 0; i + 1 < single.vertices.length; i += 2) {
+        vertices.push(this.camera.toScreen(box.x + single.vertices[i]!, box.y + single.vertices[i + 1]!));
+      }
+    }
+    return { rect: r, rotate: [r.x + r.w / 2, r.y - 30], scale: [r.x + r.w + 4, r.y + r.h + 4], vertices };
+  }
+
+  selectionHandleAt(sx: number, sy: number): SelectionHandle | null {
+    const h = this.handles();
+    if (!h) return null;
+    const near = (p: [number, number]) => Math.hypot(sx - p[0], sy - p[1]) < 22;
+    for (let i = 0; i < h.vertices.length; i++) if (near(h.vertices[i]!)) return { kind: 'vertex', index: i };
+    if (near(h.scale)) return { kind: 'scale' };
+    if (near(h.rotate)) return { kind: 'rotate' };
+    const r = h.rect;
+    if (sx >= r.x - 8 && sx <= r.x + r.w + 8 && sy >= r.y - 8 && sy <= r.y + r.h + 8)
+      return { kind: 'inside' };
+    return null;
+  }
+
+  private drawOverlay() {
+    this.overlay.clear();
+    if (this.zoom) {
+      const r = this.pageRectToScreen(this.zoom.pageId, this.zoom.rect);
+      if (r) {
+        const z = this.overlay.screen({ x: r.x - 4, y: r.y - 4, w: r.w + 8, h: r.h + 8 });
+        z.fillStyle = 'rgba(39,71,201,0.07)';
+        z.fillRect(r.x, r.y, r.w, r.h);
+        z.strokeStyle = '#2747c9';
+        z.lineWidth = 2;
+        z.strokeRect(r.x, r.y, r.w, r.h);
+      }
+    }
+    const h = this.handles();
+    if (!h) return;
+    const r = h.rect;
+    const ctx = this.overlay.screen({ x: r.x - 40, y: r.y - 60, w: r.w + 80, h: r.h + 100 });
+    ctx.save();
+    ctx.strokeStyle = '#2747c9';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(r.x - 4, r.y - 4, r.w + 8, r.h + 8);
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(r.x + r.w / 2, r.y - 4);
+    ctx.lineTo(h.rotate[0], h.rotate[1] + 8);
+    ctx.stroke();
+    const dot = (p: [number, number], fill: string, rad = 8) => {
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], rad, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#2747c9';
+      ctx.stroke();
+    };
+    dot(h.rotate, '#ffffff');
+    dot(h.scale, '#2747c9');
+    for (const v of h.vertices) dot(v, '#ffffff', 6);
+    ctx.restore();
+  }
+
+  /** Position von Auswahl/Textfeld nach Kamerabewegung an die UI melden. */
+  private emitPositions() {
+    if (this.sel) this.fire({ type: 'selection', info: this.selectionInfo() });
+    if (this.textEdit) this.fire({ type: 'textEdit', info: this.textEditInfo() });
+  }
+
+  deleteSelection() {
+    const items = this.selectedItems();
+    if (!items.length) return;
+    this.clearSelection();
+    this.doc.execute({
+      label: 'Löschen',
+      items: items.map((before) => ({ before, after: null })),
+      pages: [],
+    });
+  }
+
+  /** Kopiert die Auswahl in die interne Zwischenablage. */
+  copySelection(): boolean {
+    const items = this.selectedItems();
+    if (!items.length) return false;
+    const b = selectionBounds(items)!;
+    clipboard = items.map((it) => transformItem(it, translate(-b.x, -b.y)));
+    return true;
+  }
+
+  cutSelection() {
+    if (this.copySelection()) this.deleteSelection();
+  }
+
+  get canPaste(): boolean {
+    return !!clipboard?.length;
+  }
+
+  paste() {
+    if (clipboard?.length) this.insertItems(clipboard);
+  }
+
+  duplicateSelection() {
+    const items = this.selectedItems();
+    if (!items.length || !this.sel) return;
+    this.placeItems(
+      this.sel.pageId,
+      items.map((it) => transformItem(it, translate(16, 16))),
+    );
+  }
+
+  recolorSelection(color: string) {
+    const items = this.selectedItems();
+    if (!items.length) return;
+    const recolor = (it: Item): Item => {
+      switch (it.type) {
+        case 'stroke':
+          return { ...it, color };
+        case 'shape':
+          return { ...it, stroke: color, fill: it.fill ? color : null };
+        case 'text':
+          return { ...it, style: { ...it.style, color } };
+        case 'tape':
+          return { ...it, color };
+        default:
+          return it;
+      }
+    };
+    this.doc.execute({
+      label: 'Farbe ändern',
+      items: items.map((before) => ({ before, after: recolor(before) })),
+      pages: [],
+    });
+  }
+
+  /** Ersetzt Elemente (z. B. nach Zuschneiden oder Drehen eines Bildes). */
+  updateItems(pairs: { before: Item; after: Item }[], label = 'Bearbeiten') {
+    this.doc.execute({
+      label,
+      items: pairs.map((p) => ({ before: p.before, after: { ...p.after, bbox: itemBBox(p.after) } as Item })),
+      pages: [],
+    });
+  }
+
+  /** Rendert die Auswahl als transparentes PNG. */
+  selectionImage(scale = 3): Promise<Blob | null> {
+    return renderItemsPng(this.selectedItems(), scale);
+  }
+
+  /** Inhalte (relativ zu 0,0) auf der aktuellen Seite mittig einfügen und auswählen. */
+  insertItems(items: readonly Item[]) {
+    const pageId = this.doc.pageIds[this.currentPageIndex()];
+    const box = pageId ? this.boxes.get(pageId) : undefined;
+    if (!pageId || !box || !items.length) return;
+    const b = selectionBounds(items)!;
+    const vis = intersection(box, this.camera.visibleWorld()) ?? box;
+    const cx = vis.x + vis.w / 2 - box.x;
+    const cy = vis.y + vis.h / 2 - box.y;
+    const t = translate(cx - (b.x + b.w / 2), cy - (b.y + b.h / 2));
+    this.placeItems(
+      pageId,
+      items.map((it) => transformItem(it, t)),
+    );
+  }
+
+  private placeItems(pageId: Id, items: Item[]) {
+    let z = this.doc.topZ(pageId);
+    const created = items.map(
+      (it) => ({ ...it, id: newId(), pageId, notebookId: this.doc.id, z: ++z }) as Item,
+    );
+    this.doc.execute({
+      label: 'Einfügen',
+      items: created.map((after) => ({ before: null, after })),
+      pages: [],
+    });
+    if (this.toolId !== 'lasso') {
+      this.tools[this.toolId].cancel();
+      this.toolId = 'lasso';
+      this.emit();
+    }
+    this.setSelection(
+      pageId,
+      created.map((it) => it.id),
+    );
+  }
+
+  insertElement(def: ElementDef) {
+    this.insertItems(def.items);
+  }
+
+  /** Bild einfügen: große Fotos werden auf 2400 px verkleinert. */
+  async insertImage(file: Blob) {
+    const pageId = this.doc.pageIds[this.currentPageIndex()];
+    const box = pageId ? this.boxes.get(pageId) : undefined;
+    if (!pageId || !box) return;
+    const { blob, width, height } = await prepareImage(file);
+    const meta = await (await getBlobStore()).put(blob);
+    const k = Math.min(1, (box.w * 0.6) / width, (box.h * 0.5) / height);
+    const w = width * k;
+    const h = height * k;
+    const img: ImageItem = {
+      id: newId(),
+      type: 'image',
+      pageId,
+      notebookId: this.doc.id,
+      z: 0,
+      createdAt: Date.now(),
+      box: { x: 0, y: 0, w, h },
+      bbox: { x: 0, y: 0, w, h },
+      rotation: 0,
+      blobId: meta.id,
+      crop: { x: 0, y: 0, w: width, h: height },
+      natW: width,
+      natH: height,
+    };
+    this.insertItems([img]);
+  }
+
+  /** Elemente in einem Polygon (Seitenkoordinaten) auswählen. */
+  selectInPolygon(pageId: Id, polygon: number[]) {
+    const items = (this.doc.getItems(pageId) ?? []).filter((it) => itemInPolygon(it, polygon));
+    if (items.length)
+      this.setSelection(
+        pageId,
+        items.map((it) => it.id),
+      );
+  }
+
+  // ---------- Kreis-Auswahl ----------
+
+  offerLasso(pageId: Id, polygon: number[], strokeId: Id) {
+    this.dismissLassoOffer();
+    const box = this.boxes.get(pageId);
+    if (!box) return;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    for (let i = 0; i < polygon.length; i += 2) {
+      maxX = Math.max(maxX, polygon[i]!);
+      minY = Math.min(minY, polygon[i + 1]!);
+    }
+    const [x, y] = this.camera.toScreen(box.x + maxX, box.y + minY);
+    const timer = setTimeout(() => this.dismissLassoOffer(), 3500);
+    this.lassoOffer = { pageId, polygon, strokeId, timer };
+    this.fire({ type: 'lassoOffer', info: { x, y } });
+  }
+
+  dismissLassoOffer() {
+    if (!this.lassoOffer) return;
+    clearTimeout(this.lassoOffer.timer);
+    this.lassoOffer = null;
+    this.fire({ type: 'lassoOffer', info: null });
+  }
+
+  /** Den gerade gezeichneten Kreis entfernen und den Inhalt darin auswählen. */
+  acceptLassoOffer() {
+    const o = this.lassoOffer;
+    if (!o) return;
+    this.dismissLassoOffer();
+    const stroke = this.doc.getItems(o.pageId)?.find((it) => it.id === o.strokeId);
+    if (stroke)
+      this.doc.execute({ label: 'Kreis entfernen', items: [{ before: stroke, after: null }], pages: [] });
+    this.setTool('lasso');
+    this.selectInPolygon(o.pageId, o.polygon);
+  }
+
+  // ---------- Text ----------
+
+  startTextEdit(item: TextItem, isNew: boolean) {
+    this.finishTextEdit();
+    this.clearSelection();
+    this.textEdit = { item, isNew };
+    if (!isNew) this.preview(item.pageId, new Set([item.id]), [], item.bbox);
+    this.fire({ type: 'textEdit', info: this.textEditInfo() });
+  }
+
+  private textEditInfo(): TextEditInfo | null {
+    const te = this.textEdit;
+    if (!te) return null;
+    const screen = this.pageRectToScreen(te.item.pageId, te.item.box);
+    if (!screen) return null;
+    return { item: te.item, isNew: te.isNew, screen, scale: this.camera.scale };
+  }
+
+  get editingText(): boolean {
+    return !!this.textEdit;
+  }
+
+  /** Stil des gerade bearbeiteten Textfelds ändern. */
+  updateTextStyle(style: Partial<TextStyle>) {
+    if (!this.textEdit) return;
+    this.textEdit.item = { ...this.textEdit.item, style: { ...this.textEdit.item.style, ...style } };
+    this.fire({ type: 'textEdit', info: this.textEditInfo() });
+  }
+
+  /** Text während der Eingabe merken (ohne zu speichern). */
+  setEditingText(text: string) {
+    if (this.textEdit) this.textEdit.item = { ...this.textEdit.item, text };
+  }
+
+  /** Bearbeitung abschließen und speichern (leerer Text löscht das Feld). */
+  finishTextEdit() {
+    const te = this.textEdit;
+    if (!te) return;
+    this.textEdit = null;
+    this.fire({ type: 'textEdit', info: null });
+    const value = te.item.text;
+    const after = fitText(te.item);
+    if (te.isNew) {
+      if (value.trim()) this.doc.execute({ label: 'Text', items: [{ before: null, after }], pages: [] });
+      return;
+    }
+    const before = this.doc.getItems(te.item.pageId)?.find((it) => it.id === te.item.id) as
+      TextItem | undefined;
+    if (!before) return;
+    if (!value.trim()) {
+      this.doc.execute({ label: 'Text löschen', items: [{ before, after: null }], pages: [] });
+    } else if (value !== before.text || JSON.stringify(te.item.style) !== JSON.stringify(before.style)) {
+      this.doc.execute({ label: 'Text bearbeiten', items: [{ before, after }], pages: [] });
+    } else {
+      this.preview(before.pageId, new Set(), [], before.bbox);
+    }
+  }
+
+  // ---------- Bilder ----------
+
+  private onImageLoaded(blobId: Id) {
+    for (const [pageId, view] of this.views) {
+      const items = this.doc.getItems(pageId);
+      if (items?.some((it) => it.type === 'image' && it.blobId === blobId)) view.renderInk(items);
+    }
+  }
+
   // ---------- Debug ----------
 
   private setDebug(on: boolean) {
@@ -783,4 +1377,48 @@ export class Editor implements ToolHost {
     this.debug = { frames: 0, events: 0, samples: 0, since: now };
     this.requestFrame();
   }
+}
+
+/** Interne Zwischenablage (relativ zu 0,0), gilt für alle Notizbücher. */
+let clipboard: Item[] | null = null;
+
+/** Rendert Elemente als transparentes PNG. */
+export async function renderItemsPng(items: readonly Item[], scale = 3): Promise<Blob | null> {
+  const b = selectionBounds(items);
+  if (!b) return null;
+  const pad = 4;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil((b.w + pad * 2) * scale));
+  c.height = Math.max(1, Math.ceil((b.h + pad * 2) * scale));
+  const ctx = c.getContext('2d')!;
+  ctx.setTransform(scale, 0, 0, scale, (pad - b.x) * scale, (pad - b.y) * scale);
+  drawItems(
+    ctx,
+    [...items].sort((x, y) => x.z - y.z),
+  );
+  const out = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
+  c.width = c.height = 0;
+  return out;
+}
+
+/** Verkleinert große Fotos und liefert die Pixelmaße. */
+async function prepareImage(file: Blob): Promise<{ blob: Blob; width: number; height: number }> {
+  const bmp = await createImageBitmap(file);
+  const MAX = 2400;
+  const k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+  if (k >= 1 && (file.type === 'image/png' || file.type === 'image/jpeg')) {
+    const out = { blob: file, width: bmp.width, height: bmp.height };
+    bmp.close();
+    return out;
+  }
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * k);
+  c.height = Math.round(bmp.height * k);
+  c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close();
+  const png = file.type === 'image/png';
+  const blob = await new Promise<Blob | null>((r) => c.toBlob(r, png ? 'image/png' : 'image/jpeg', 0.9));
+  const out = { blob: blob ?? file, width: c.width, height: c.height };
+  c.width = c.height = 0;
+  return out;
 }

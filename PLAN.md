@@ -1,6 +1,6 @@
 # Feder – Umsetzungsplan
 
-Stand: 17.10.2026 · Status: **Phase 1 abgeschlossen**, aus Phase 3 vorgezogen: PDF-Import/-Export und Backup
+Stand: 17.10.2026 · Status: **Phasen 1–2 abgeschlossen**, aus Phase 3 vorgezogen: PDF-Import/-Export und Backup
 
 > Bestätigt am 17.10.2026: E1 Svelte 5 · E2 alle Pakete aus §9 · E3 mkcert ·
 > E4 öffentliches Repo `feder` mit GitHub Pages. E5–E7 gelten als Empfehlung, solange du nicht widersprichst.
@@ -428,18 +428,19 @@ iPad-Prüfliste an dich.
 - [x] Safari-Gesten-Unterdrückung, Safe Areas, schmale Breiten (Split View)
 - [x] Tests: 52 Unit-Tests (Modell, Codec, Bibliothek, Autosave, Verlauf, Geometrie, Eingabe, Kamera, BlobStore), 8 WebKit-Smoke-Tests (Stift-Eingabe simuliert)
 
-### Phase 2 – Werkzeuge
-- [ ] Lasso: Freihand, Rechteck, Circle-to-Lasso; verschieben, skalieren, drehen, umfärben, kopieren/einfügen, duplizieren, löschen, als Bild exportieren, als Element speichern
-- [ ] Formen: Erkennung beim Halten (Linie, Pfeil, Rechteck, Ellipse, Dreieck, Polygon), Füllung, nachträglich bearbeitbar (Griffe)
-- [ ] Textboxen (Schrift, Größe, Farbe, Ausrichtung; Scribble-tauglich)
-- [ ] Bilder: einfügen (Datei/Foto/Zwischenablage), zuschneiden, drehen, skalieren
-- [ ] Tape: zeichnen, Muster, Antippen deckt auf/zu
-- [ ] Elemente/Sticker: Bibliothek gespeicherter Auswahlen, eigene Basis-Sticker (selbst gezeichnet)
-- [ ] Laserpointer (Punkt + Spur, verblasst)
-- [ ] Zoom-Fenster am unteren Rand (Lupe mit Schreibbereich, automatischer Vorschub)
-- [x] Gesten: 2-Finger-Tipp Undo, 3-Finger-Tipp Redo (in Phase 1 erledigt)
-- [ ] Tastaturkürzel für die neuen Werkzeuge
-- [ ] Tests: Lasso-Hit-Test, Transformationen, Formerkennung, Command-Roundtrips
+### Phase 2 – Werkzeuge ✅
+- [x] Lasso: Freihand, Rechteck, Kreis-um-Inhalt bietet Auswahl an; verschieben, skalieren, drehen (mit Einrasten), umfärben, kopieren/ausschneiden/einfügen, duplizieren, löschen, als Bild teilen, als Element speichern; Auswahl auch mit dem Finger bewegen
+- [x] Formen: eigenes Werkzeug und „zeichnen und halten“ beim Stift; Linie, Pfeil, Rechteck, Ellipse/Kreis, Dreieck, Polygon; Füllung, Strichart; Eckpunkte nachträglich verschiebbar
+- [x] Textboxen: echtes Textfeld (Tastatur, Diktat, Scribble), Schriftart, Größe, Farbe, fett/kursiv, Ausrichtung; Antippen bearbeitet vorhandenen Text
+- [x] Bilder: einfügen (Datei/Fotos, ⌘V), große Fotos werden auf 2400 px verkleinert, zuschneiden, um 90° drehen, frei drehen/skalieren per Lasso
+- [x] Tape: ziehen legt Streifen, Antippen (Stift oder Finger) deckt auf/zu
+- [x] Elemente: Auswahl speichern, Bibliothek mit Vorschau, einfügen, löschen
+- [x] Laserpointer (leuchtende Spur, verblasst)
+- [x] Zoom-Fenster am unteren Rand: Schreiben vergrößert, automatischer Vorschub, „Neue Zeile“, Rahmen per Finger-Tipp versetzen
+- [x] Radierer entfernt auch Formen und Tape
+- [x] Gesten: 2-Finger-Tipp Undo, 3-Finger-Tipp Redo; Tastaturkürzel P H E L S T B X, ⌘A/⌘C/⌘X/⌘V/⌘D, Entf, Esc
+- [x] PDF-Export enthält Formen, Text (Standardschriften), Bilder (inkl. Zuschnitt/Drehung) und Tape
+- [x] Tests: Formerkennung, Transformationen, Treffertests, Export aller Typen; E2E: Formen, Lasso, Kreis-Auswahl, Text, Tape, Bild, Zoom-Fenster
 
 ### Phase 3 – PDF & Daten
 - [x] PDF-Import (Datei + Drag & Drop) → OPFS, Seiten als `pdf`-Vorlage; PDF in bestehendes Notizbuch einfügen (vorgezogen)
@@ -514,4 +515,7 @@ Keine Laufzeitabhängigkeiten über die Vorgaben hinaus.
 | 17.10.2026 | Auf Wunsch vorgezogen: PDF-Import/Annotation, PDF-/Bild-/Feder-Export, Teilen, Vollbackup (Teile von Phase 3) |
 | 17.10.2026 | Wiederherstellen eines Vollbackups ersetzt alles (kein Zusammenführen, damit nichts unbemerkt überschrieben wird) |
 | 17.10.2026 | Teilen in zwei Schritten („Datei erstellen“ → „Teilen oder sichern“), weil Safari navigator.share nur direkt nach einem Tipp erlaubt |
+| 17.10.2026 | Schema v2: Tabellen für Elemente, Lesezeichen, Outline, Suchindex, Vorlagen, Audio, Lernkarten auf einmal angelegt; Formen bekommen fillOpacity/opacity |
+| 17.10.2026 | Text wird auf dem Canvas gezeichnet (gleich wie im Export); bearbeitet wird in einem echten Textfeld darüber (Scribble) |
+| 17.10.2026 | Transformationen nur als Ähnlichkeit (Verschieben, gleichmäßig Skalieren, Drehen) – kein Verzerren |
 | 17.10.2026 | Design: Löschblatt-Blaugrau, Tinte Blauschwarz, Akzent Königsblau, Schrift Avenir Next (auf dem iPad vorhanden, offline) |

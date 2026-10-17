@@ -1,4 +1,4 @@
-import type { DashStyle, PenKind } from './types';
+import type { DashStyle, FontFamily, PenKind } from './types';
 
 export type ThemeSetting = 'system' | 'light' | 'dark';
 export type PressureSetting = 'auto' | 'real' | 'velocity' | 'none';
@@ -32,6 +32,22 @@ export interface EraserSettings {
   highlighterOnly: boolean;
 }
 
+export interface ShapeSettings {
+  color: string;
+  width: number;
+  dash: DashStyle;
+  fill: boolean;
+}
+
+export interface TextSettings {
+  font: FontFamily;
+  size: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  align: 'left' | 'center' | 'right';
+}
+
 export interface AppSettings {
   theme: ThemeSetting;
   fingerDrawing: boolean;
@@ -46,6 +62,13 @@ export interface AppSettings {
   pen: PenSettings;
   highlighter: HighlighterSettings;
   eraser: EraserSettings;
+  lasso: { mode: 'free' | 'rect' };
+  shape: ShapeSettings;
+  text: TextSettings;
+  tape: { color: string; width: number };
+  laser: { color: string };
+  /** Kreis um Inhalte mit dem Stift bietet eine Auswahl an. */
+  circleToLasso: boolean;
   /** Eigene Farbpalette. */
   palette: string[];
   librarySort: LibrarySort;
@@ -80,6 +103,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
     widths: [6, 11, 18],
   },
   eraser: { mode: 'stroke', size: 14, sizes: [7, 14, 28], highlighterOnly: false },
+  lasso: { mode: 'free' },
+  shape: { color: '#16203a', width: 1.6, dash: 'solid', fill: false },
+  text: { font: 'sans', size: 14, color: '#16203a', bold: false, italic: false, align: 'left' },
+  tape: { color: '#e8a33d', width: 18 },
+  laser: { color: '#e5383b' },
+  circleToLasso: true,
   librarySort: 'updated',
   libraryView: 'grid',
   backupReminderDays: 7,
@@ -107,5 +136,10 @@ export function mergeSettings(stored: Partial<AppSettings> | undefined): AppSett
     pen: { ...d.pen, ...stored.pen },
     highlighter: { ...d.highlighter, ...stored.highlighter },
     eraser: { ...d.eraser, ...stored.eraser },
+    lasso: { ...d.lasso, ...stored.lasso },
+    shape: { ...d.shape, ...stored.shape },
+    text: { ...d.text, ...stored.text },
+    tape: { ...d.tape, ...stored.tape },
+    laser: { ...d.laser, ...stored.laser },
   };
 }

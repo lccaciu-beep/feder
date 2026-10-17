@@ -6,7 +6,8 @@ export interface GestureHandlers {
   onPanZoom(dx: number, dy: number, factor: number, cx: number, cy: number): void;
   /** Geschwindigkeit in px/ms beim Loslassen */
   onEnd(vx: number, vy: number): void;
-  onTap(fingers: number): void;
+  /** Tipp mit `fingers` Fingern; (x, y) = Mittelpunkt der Startpositionen */
+  onTap(fingers: number, x: number, y: number): void;
 }
 
 interface Track {
@@ -24,6 +25,8 @@ export class TouchGestures {
   private startTime = 0;
   private maxFingers = 0;
   private moved = false;
+  private tapX = 0;
+  private tapY = 0;
   private prevCx = 0;
   private prevCy = 0;
   private prevDist = 0;
@@ -54,6 +57,11 @@ export class TouchGestures {
       this.h.onStart();
     }
     this.pts.set(id, { x, y, sx: x, sy: y });
+    if (this.pts.size > this.maxFingers) {
+      const { cx, cy } = this.centroid();
+      this.tapX = cx;
+      this.tapY = cy;
+    }
     this.maxFingers = Math.max(this.maxFingers, this.pts.size);
     this.resetReference();
   }
@@ -89,7 +97,7 @@ export class TouchGestures {
     this.active = false;
     if (!this.moved && t - this.startTime < TAP_MAX_MS) {
       this.h.onEnd(0, 0);
-      this.h.onTap(this.maxFingers);
+      this.h.onTap(this.maxFingers, this.tapX, this.tapY);
       return;
     }
     let vx = 0;

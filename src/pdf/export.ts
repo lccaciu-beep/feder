@@ -11,12 +11,18 @@ import {
   popGraphicsState,
   pushGraphicsState,
   rgb,
+  rectangle,
+  clip,
+  endPath,
   type PDFFont,
+  type PDFImage,
   type PDFPage,
   type RGB,
 } from 'pdf-lib';
 import { dashPattern, strokeSvg } from '../engine/ink/brushes';
-import type { Id, Item, Page, PaperSpec, StrokeItem } from '../model/types';
+import type { Id, Item, Page, PaperSpec, Rect, ShapeItem, TextStyle } from '../model/types';
+import { tapeCorners } from '../engine/geometry/transform';
+import { LINE_HEIGHT, wrapText } from '../engine/render/items';
 import { getBlobStore } from '../storage/blobstore';
 import { getDb } from '../storage/db';
 import { drawPaper } from '../templates/draw';
@@ -83,36 +89,267 @@ function hexToRgb(hex: string): RGB {
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 }
 
-/** Zeichnet die Inhalte einer Seite in Anzeige-Koordinaten auf eine PDF-Seite. */
-function drawInk(page: PDFPage, items: readonly Item[], toDisplay: Matrix) {
-  const strokes = items.filter((it): it is StrokeItem => it.type === 'stroke');
+/** Schriften für Textfelder (Standardschriften, WinAnsi). */
+export interface PdfFonts {
+  get(style: TextStyle): Promise<PDFFont>;
+}
+
+function makeFonts(doc: PDFDocument): PdfFonts {
+  const cache = new Map<string, Promise<PDFFont>>();
+  const pick = (s: TextStyle): StandardFonts => {
+    const b = s.bold;
+    const i = s.italic || s.font === 'hand';
+    if (s.font === 'serif')
+      return b && i
+        ? StandardFonts.TimesRomanBoldItalic
+        : b
+          ? StandardFonts.TimesRomanBold
+          : i
+            ? StandardFonts.TimesRomanItalic
+            : StandardFonts.TimesRoman;
+    if (s.font === 'mono')
+      return b && i
+        ? StandardFonts.CourierBoldOblique
+        : b
+          ? StandardFonts.CourierBold
+          : i
+            ? StandardFonts.CourierOblique
+            : StandardFonts.Courier;
+    return b && i
+      ? StandardFonts.HelveticaBoldOblique
+      : b
+        ? StandardFonts.HelveticaBold
+        : i
+          ? StandardFonts.HelveticaOblique
+          : StandardFonts.Helvetica;
+  };
+  return {
+    get(style) {
+      const name = pick(style);
+      let f = cache.get(name);
+      if (!f) cache.set(name, (f = doc.embedFont(name)));
+      return f;
+    },
+  };
+}
+
+/** Zeichen, die die Standardschriften (WinAnsi) nicht kennen, ersetzen. */
+function encodable(font: PDFFont, text: string): string {
+  try {
+    font.encodeText(text);
+    return text;
+  } catch {
+    return [...text]
+      .map((ch) => {
+        try {
+          font.encodeText(ch);
+          return ch;
+        } catch {
+          return '?';
+        }
+      })
+      .join('');
+  }
+}
+
+function shapeSvg(s: ShapeItem): string {
+  const v = s.vertices;
+  const n = (x: number) => (Math.round(x * 100) / 100).toString();
+  switch (s.shape) {
+    case 'line':
+      return `M${n(v[0]!)} ${n(v[1]!)}L${n(v[2]!)} ${n(v[3]!)}`;
+    case 'arrow': {
+      const [x0, y0, x1, y1] = v as [number, number, number, number];
+      const ang = Math.atan2(y1 - y0, x1 - x0);
+      const head = Math.min(Math.hypot(x1 - x0, y1 - y0) * 0.4, Math.max(8, s.width * 5));
+      let d = `M${n(x0)} ${n(y0)}L${n(x1)} ${n(y1)}`;
+      for (const a of [Math.PI * 0.82, -Math.PI * 0.82]) {
+        d += `M${n(x1)} ${n(y1)}L${n(x1 + Math.cos(ang + a) * head)} ${n(y1 + Math.sin(ang + a) * head)}`;
+      }
+      return d;
+    }
+    case 'ellipse': {
+      const [cx, cy, rx, ry] = v as [number, number, number, number];
+      const c = Math.cos(s.rotation);
+      const sn = Math.sin(s.rotation);
+      const p = (t: number): [number, number] => [
+        cx + rx * Math.cos(t) * c - ry * Math.sin(t) * sn,
+        cy + rx * Math.cos(t) * sn + ry * Math.sin(t) * c,
+      ];
+      // Ellipse aus 4 kubischen Bézierkurven
+      const k = 0.5522847498;
+      let d = '';
+      for (let i = 0; i < 4; i++) {
+        const t0 = (i * Math.PI) / 2;
+        const t1 = t0 + Math.PI / 2;
+        const a = p(t0);
+        const b = p(t1);
+        const ta: [number, number] = [
+          -rx * Math.sin(t0) * c - ry * Math.cos(t0) * sn,
+          -rx * Math.sin(t0) * sn + ry * Math.cos(t0) * c,
+        ];
+        const tb: [number, number] = [
+          -rx * Math.sin(t1) * c - ry * Math.cos(t1) * sn,
+          -rx * Math.sin(t1) * sn + ry * Math.cos(t1) * c,
+        ];
+        if (!i) d += `M${n(a[0])} ${n(a[1])}`;
+        d += `C${n(a[0] + ta[0] * k)} ${n(a[1] + ta[1] * k)} ${n(b[0] - tb[0] * k)} ${n(b[1] - tb[1] * k)} ${n(b[0])} ${n(b[1])}`;
+      }
+      return d + 'Z';
+    }
+    default: {
+      let d = `M${n(v[0]!)} ${n(v[1]!)}`;
+      for (let i = 2; i + 1 < v.length; i += 2) d += `L${n(v[i]!)} ${n(v[i + 1]!)}`;
+      return d + 'Z';
+    }
+  }
+}
+
+/** Dreht im (y-nach-oben-)Raum der Inhalte um die Mitte eines Rahmens. */
+function rotateAbout(page: PDFPage, box: Rect, rotation: number) {
+  if (!rotation) return;
+  const cx = box.x + box.w / 2;
+  const cy = -(box.y + box.h / 2);
+  const c = Math.cos(-rotation);
+  const s = Math.sin(-rotation);
+  page.pushOperators(concatTransformationMatrix(c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy));
+}
+
+async function embedImage(doc: PDFDocument, blobId: Id, cache: Map<Id, Promise<PDFImage | null>>) {
+  let p = cache.get(blobId);
+  if (!p) {
+    p = (async () => {
+      const blob = await (await getBlobStore()).get(blobId);
+      if (!blob) return null;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      if (blob.type === 'image/png') return doc.embedPng(bytes);
+      if (blob.type === 'image/jpeg') return doc.embedJpg(bytes);
+      // andere Formate (z. B. HEIC) über einen Canvas in JPEG umwandeln
+      if (typeof document === 'undefined') return null;
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement('canvas');
+      c.width = bmp.width;
+      c.height = bmp.height;
+      c.getContext('2d')!.drawImage(bmp, 0, 0);
+      bmp.close();
+      const jpg = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/jpeg', 0.92));
+      c.width = c.height = 0;
+      return jpg ? doc.embedJpg(new Uint8Array(await jpg.arrayBuffer())) : null;
+    })().catch(() => null);
+    cache.set(blobId, p);
+  }
+  return p;
+}
+
+interface DrawContext {
+  doc: PDFDocument;
+  fonts: PdfFonts;
+  images: Map<Id, Promise<PDFImage | null>>;
+}
+
+/** Zeichnet alle Inhalte einer Seite (Anzeige-Koordinaten) auf eine PDF-Seite. */
+async function drawContent(page: PDFPage, items: readonly Item[], toDisplay: Matrix, dc: DrawContext) {
   const ordered = [
-    ...strokes.filter((s) => s.tool === 'highlighter'),
-    ...strokes.filter((s) => s.tool !== 'highlighter'),
+    ...items.filter((s) => s.type === 'stroke' && s.tool === 'highlighter'),
+    ...items.filter((s) => !(s.type === 'stroke' && s.tool === 'highlighter') && s.type !== 'link'),
   ];
   if (!ordered.length) return;
   // drawSvgPath spiegelt selbst an der x-Achse; zusammen mit dieser Matrix
   // landen SVG-Koordinaten (= Anzeige-Koordinaten) an der richtigen Stelle.
+  // Für Bilder und Text gilt hier: Anzeige-y = −y.
   const k = compose(invert(toDisplay), [1, 0, 0, -1, 0, 0]);
   page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...k));
-  for (const s of ordered) {
-    const path = strokeSvg(s);
-    if (!path) continue;
-    const color = hexToRgb(s.color);
-    const opacity = s.opacity * (s.tool === 'pencil' ? 0.85 : 1);
-    const blendMode = s.tool === 'highlighter' ? BlendMode.Multiply : undefined;
-    if (s.dash === 'solid') {
-      page.drawSvgPath(path, { x: 0, y: 0, color, opacity, blendMode });
-    } else {
-      page.drawSvgPath(path, {
-        x: 0,
-        y: 0,
-        borderColor: color,
-        borderOpacity: opacity,
-        borderWidth: s.width,
-        borderDashArray: dashPattern(s.dash, s.width),
-        borderLineCap: LineCapStyle.Round,
-      });
+  for (const it of ordered) {
+    switch (it.type) {
+      case 'stroke': {
+        const path = strokeSvg(it);
+        if (!path) break;
+        const color = hexToRgb(it.color);
+        const opacity = it.opacity * (it.tool === 'pencil' ? 0.85 : 1);
+        const blendMode = it.tool === 'highlighter' ? BlendMode.Multiply : undefined;
+        if (it.dash === 'solid') page.drawSvgPath(path, { x: 0, y: 0, color, opacity, blendMode });
+        else
+          page.drawSvgPath(path, {
+            x: 0,
+            y: 0,
+            borderColor: color,
+            borderOpacity: opacity,
+            borderWidth: it.width,
+            borderDashArray: dashPattern(it.dash, it.width),
+            borderLineCap: LineCapStyle.Round,
+          });
+        break;
+      }
+      case 'shape': {
+        const closed = it.shape !== 'line' && it.shape !== 'arrow';
+        page.drawSvgPath(shapeSvg(it), {
+          x: 0,
+          y: 0,
+          color: closed && it.fill ? hexToRgb(it.fill) : undefined,
+          opacity: it.fillOpacity * it.opacity,
+          borderColor: hexToRgb(it.stroke),
+          borderOpacity: it.opacity,
+          borderWidth: it.width,
+          borderDashArray: it.dash === 'solid' ? undefined : dashPattern(it.dash, it.width),
+          borderLineCap: LineCapStyle.Round,
+        });
+        break;
+      }
+      case 'tape': {
+        const v = tapeCorners(it);
+        let d = `M${v[0]} ${v[1]}`;
+        for (let i = 2; i < v.length; i += 2) d += `L${v[i]} ${v[i + 1]}`;
+        page.drawSvgPath(d + 'Z', { x: 0, y: 0, color: hexToRgb(it.color), opacity: it.covered ? 1 : 0.18 });
+        break;
+      }
+      case 'text': {
+        if (!it.text) break;
+        const font = await dc.fonts.get(it.style);
+        const lh = it.style.size * LINE_HEIGHT;
+        const pad = (lh - it.style.size) / 2;
+        page.pushOperators(pushGraphicsState());
+        rotateAbout(page, it.box, it.rotation);
+        wrapText(it.text, it.style, it.box.w).forEach((raw, i) => {
+          const line = encodable(font, raw);
+          const w = font.widthOfTextAtSize(line, it.style.size);
+          const x =
+            it.style.align === 'left'
+              ? it.box.x
+              : it.style.align === 'center'
+                ? it.box.x + (it.box.w - w) / 2
+                : it.box.x + it.box.w - w;
+          const baseline = it.box.y + 2 + pad + i * lh + it.style.size * 0.8;
+          page.drawText(line, {
+            x,
+            y: -baseline,
+            size: it.style.size,
+            font,
+            color: hexToRgb(it.style.color),
+          });
+        });
+        page.pushOperators(popGraphicsState());
+        break;
+      }
+      case 'image': {
+        const img = await embedImage(dc.doc, it.blobId, dc.images);
+        if (!img) break;
+        const sx = it.box.w / it.crop.w;
+        const sy = it.box.h / it.crop.h;
+        page.pushOperators(pushGraphicsState());
+        rotateAbout(page, it.box, it.rotation);
+        page.pushOperators(
+          rectangle(it.box.x, -(it.box.y + it.box.h), it.box.w, it.box.h),
+          clip(),
+          endPath(),
+        );
+        const fullW = it.natW * sx;
+        const fullH = it.natH * sy;
+        const left = it.box.x - it.crop.x * sx;
+        const top = it.box.y - it.crop.y * sy;
+        page.drawImage(img, { x: left, y: -(top + fullH), width: fullW, height: fullH });
+        page.pushOperators(popGraphicsState());
+        break;
+      }
     }
   }
   page.pushOperators(popGraphicsState());
@@ -220,6 +457,7 @@ export async function exportNotebookPdf(notebookId: Id, opts: PdfExportOptions):
   out.setCreator('Feder');
   out.setProducer('Feder');
   const bold = await out.embedFont(StandardFonts.HelveticaBold);
+  const dc: DrawContext = { doc: out, fonts: makeFonts(out), images: new Map() };
   const sources = new Map<Id, Promise<PDFDocument>>();
   const source = (blobId: Id) => {
     let p = sources.get(blobId);
@@ -249,7 +487,7 @@ export async function exportNotebookPdf(notebookId: Id, opts: PdfExportOptions):
       if (opts.withTemplate) drawTemplate(pdfPage, page.paper, bold);
       toDisplay = userToDisplay(0, { x: 0, y: 0, width: page.paper.width, height: page.paper.height });
     }
-    drawInk(pdfPage, items, toDisplay);
+    await drawContent(pdfPage, items, toDisplay, dc);
   }
   if (!order.length) out.addPage();
   const bytes = await out.save();

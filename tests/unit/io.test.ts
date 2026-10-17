@@ -204,3 +204,70 @@ describe('Aufräumen', () => {
     expect(await db.blobs.get(meta.id)).toBeUndefined();
   });
 });
+
+describe('PDF-Export aller Elementtypen', () => {
+  it('exportiert Formen, Text und Tape ohne Fehler', async () => {
+    const nb = await createNotebook({ title: 'Mix', folderId: null, cover });
+    const base = {
+      pageId: nb.pageIds[0]!,
+      notebookId: nb.id,
+      createdAt: 0,
+      bbox: { x: 0, y: 0, w: 10, h: 10 },
+    };
+    await db.items.bulkAdd([
+      {
+        ...base,
+        id: 's1',
+        z: 1,
+        type: 'shape',
+        shape: 'ellipse',
+        vertices: [100, 100, 40, 20],
+        rotation: 0.3,
+        stroke: '#123456',
+        fill: '#123456',
+        fillOpacity: 0.2,
+        width: 2,
+        dash: 'dashed',
+        opacity: 1,
+      },
+      {
+        ...base,
+        id: 's2',
+        z: 2,
+        type: 'shape',
+        shape: 'arrow',
+        vertices: [10, 10, 200, 80],
+        rotation: 0,
+        stroke: '#000',
+        fill: null,
+        fillOpacity: 0.2,
+        width: 1.5,
+        dash: 'solid',
+        opacity: 1,
+      },
+      {
+        ...base,
+        id: 't1',
+        z: 3,
+        type: 'text',
+        box: { x: 50, y: 300, w: 200, h: 40 },
+        rotation: 0.2,
+        text: 'Grüße – Prüfung ✓ 你好',
+        style: { font: 'serif', size: 14, color: '#2747c9', align: 'center', bold: true, italic: false },
+      },
+      {
+        ...base,
+        id: 'tp',
+        z: 4,
+        type: 'tape',
+        path: [40, 500, 300, 500],
+        width: 18,
+        color: '#e8a33d',
+        covered: true,
+      },
+    ] as never);
+    const blob = await exportNotebookPdf(nb.id, { withTemplate: true });
+    const out = await PDFDocument.load(await blob.arrayBuffer());
+    expect(out.getPageCount()).toBe(1);
+  });
+});

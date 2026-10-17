@@ -1,6 +1,23 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { BlobData, BlobMeta, Folder, Item, Meta, Notebook, Page, Setting } from '../model/types';
-import { SCHEMA_VERSION } from '../model/migrations';
+import type {
+  AudioClip,
+  BlobData,
+  BlobMeta,
+  Bookmark,
+  CustomTemplate,
+  Deck,
+  ElementDef,
+  Flashcard,
+  Folder,
+  Item,
+  Meta,
+  Notebook,
+  OutlineEntry,
+  Page,
+  Setting,
+  TextIndexEntry,
+} from '../model/types';
+import { SCHEMA_VERSION, upgradeItemV2 } from '../model/migrations';
 
 export class FederDB extends Dexie {
   folders!: EntityTable<Folder, 'id'>;
@@ -11,6 +28,14 @@ export class FederDB extends Dexie {
   blobData!: EntityTable<BlobData, 'id'>;
   settings!: EntityTable<Setting, 'key'>;
   meta!: EntityTable<Meta, 'key'>;
+  elements!: EntityTable<ElementDef, 'id'>;
+  bookmarks!: EntityTable<Bookmark, 'id'>;
+  outline!: EntityTable<OutlineEntry, 'id'>;
+  textIndex!: EntityTable<TextIndexEntry, 'id'>;
+  templates!: EntityTable<CustomTemplate, 'id'>;
+  audio!: EntityTable<AudioClip, 'id'>;
+  decks!: EntityTable<Deck, 'id'>;
+  cards!: EntityTable<Flashcard, 'id'>;
 
   constructor(name = 'feder') {
     super(name);
@@ -26,6 +51,24 @@ export class FederDB extends Dexie {
       settings: 'key',
       meta: 'key',
     });
+    this.version(2)
+      .stores({
+        elements: 'id, createdAt',
+        bookmarks: 'id, notebookId, pageId',
+        outline: 'id, notebookId, pageId',
+        textIndex: 'id, notebookId, pageId, *tokens',
+        templates: 'id, createdAt',
+        audio: 'id, notebookId',
+        decks: 'id, notebookId',
+        cards: 'id, deckId, due',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('items')
+          .toCollection()
+          .modify((it: Record<string, unknown>) => Object.assign(it, upgradeItemV2(it)));
+        await tx.table('meta').put({ key: 'schemaVersion', value: 2 });
+      });
     this.on('populate', (tx) => {
       void tx.table('meta').add({ key: 'schemaVersion', value: SCHEMA_VERSION });
     });

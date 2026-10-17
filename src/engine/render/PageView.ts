@@ -9,7 +9,7 @@
 import type { Item, Page, Rect } from '../../model/types';
 import { drawPaper } from '../../templates/draw';
 import { renderPdfRegion } from '../../pdf/pdfjs';
-import { drawItems } from '../ink/brushes';
+import { drawItems } from './items';
 import { intersects } from '../geometry/rect';
 
 export { chooseLevel, MAX_CANVAS_PIXELS } from './levels';

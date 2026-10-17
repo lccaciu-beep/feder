@@ -271,10 +271,17 @@ export async function deletePermanently(sel: Selection): Promise<void> {
   const blobIds = new Set<Id>();
   if (nbIds.length) {
     for (const p of await db.pages.where('notebookId').anyOf(nbIds).toArray()) {
-      if (p.paper.template.kind === 'pdf') blobIds.add(p.paper.template.blobId);
+      const t = p.paper.template;
+      if (t.kind === 'pdf' || t.kind === 'image') blobIds.add(t.blobId);
     }
+    for (const it of await db.items.where('notebookId').anyOf(nbIds).toArray()) {
+      if (it.type === 'image') blobIds.add(it.blobId);
+    }
+    for (const a of await db.audio.where('notebookId').anyOf(nbIds).toArray()) blobIds.add(a.blobId);
   }
-  await db.transaction('rw', [db.folders, db.notebooks, db.pages, db.items], async () => {
+  const related = [db.bookmarks, db.outline, db.textIndex, db.audio];
+  await db.transaction('rw', [db.folders, db.notebooks, db.pages, db.items, ...related], async () => {
+    if (nbIds.length) for (const t of related) await t.where('notebookId').anyOf(nbIds).delete();
     if (nbIds.length) {
       await db.items.where('notebookId').anyOf(nbIds).delete();
       await db.pages.where('notebookId').anyOf(nbIds).delete();
@@ -285,14 +292,18 @@ export async function deletePermanently(sel: Selection): Promise<void> {
   await deleteUnusedBlobs(blobIds);
 }
 
-/** Löscht Dateien (PDFs), auf die keine Seite mehr verweist. */
+/** Löscht Dateien (PDFs, Bilder, Audio), auf die nichts mehr verweist. */
 export async function deleteUnusedBlobs(candidates: Iterable<Id>): Promise<void> {
   const ids = new Set(candidates);
   if (!ids.size) return;
   const db = getDb();
   await db.pages.each((p) => {
-    if (p.paper.template.kind === 'pdf') ids.delete(p.paper.template.blobId);
+    const t = p.paper.template;
+    if (t.kind === 'pdf' || t.kind === 'image') ids.delete(t.blobId);
   });
+  if (ids.size) await db.items.each((it) => void (it.type === 'image' && ids.delete(it.blobId)));
+  if (ids.size) await db.templates.each((t) => void ids.delete(t.blobId));
+  if (ids.size) await db.audio.each((a) => void ids.delete(a.blobId));
   if (!ids.size) return;
   const store = await getBlobStore();
   for (const id of ids) await store.delete(id);

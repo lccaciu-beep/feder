@@ -8,7 +8,7 @@
 import { base64ToFloat32, float32ToBase64 } from '../model/codec';
 import { newId } from '../model/ids';
 import { migrate, SCHEMA_VERSION, type TableDump } from '../model/migrations';
-import type { BlobMeta, Folder, Id, Item, Notebook, Page, Setting } from '../model/types';
+import type { AudioClip, BlobMeta, Bookmark, Id, Item, Notebook, OutlineEntry, Page } from '../model/types';
 import { flushAllAutosaves } from '../storage/autosave';
 import { getBlobStore } from '../storage/blobstore';
 import { getDb } from '../storage/db';
@@ -45,9 +45,15 @@ export function fromJson<T>(text: string): T {
   ) as T;
 }
 
-function pdfBlobIds(pages: Page[]): Set<Id> {
+/** Alle Dateien, auf die Seiten, Bilder oder Audioaufnahmen verweisen. */
+function blobRefs(pages: Page[], items: Item[], audio: AudioClip[]): Set<Id> {
   const ids = new Set<Id>();
-  for (const p of pages) if (p.paper.template.kind === 'pdf') ids.add(p.paper.template.blobId);
+  for (const p of pages) {
+    const t = p.paper.template;
+    if (t.kind === 'pdf' || t.kind === 'image') ids.add(t.blobId);
+  }
+  for (const it of items) if (it.type === 'image') ids.add(it.blobId);
+  for (const a of audio) ids.add(a.blobId);
   return ids;
 }
 
@@ -88,22 +94,30 @@ async function build(
   );
 }
 
+/** Tabellen, die ein Vollbackup enthält (textIndex wird mitgesichert, ist aber ableitbar). */
+const BACKUP_TABLES = [
+  'folders',
+  'notebooks',
+  'pages',
+  'items',
+  'settings',
+  'elements',
+  'bookmarks',
+  'outline',
+  'textIndex',
+  'templates',
+  'audio',
+  'decks',
+  'cards',
+] as const;
+
 /** Vollbackup aller Daten als eine Datei. */
 export async function exportBackup(): Promise<Blob> {
   await flushAllAutosaves();
   const db = getDb();
-  const [folders, notebooks, pages, items, settings] = await Promise.all([
-    db.folders.toArray(),
-    db.notebooks.toArray(),
-    db.pages.toArray(),
-    db.items.toArray(),
-    db.settings.toArray(),
-  ]);
-  const blob = await build(
-    'backup',
-    { folders, notebooks, pages, items, settings },
-    (await db.blobs.toCollection().primaryKeys()) as Id[],
-  );
+  const tables: TableDump = {};
+  for (const name of BACKUP_TABLES) tables[name] = await db.table(name).toArray();
+  const blob = await build('backup', tables, (await db.blobs.toCollection().primaryKeys()) as Id[]);
   await db.meta.put({ key: 'lastBackupAt', value: Date.now() });
   return blob;
 }
@@ -114,9 +128,19 @@ export async function exportNotebookFile(notebookId: Id): Promise<Blob> {
   const db = getDb();
   const nb = await db.notebooks.get(notebookId);
   if (!nb) throw new Error('Notizbuch nicht gefunden.');
-  const pages = await db.pages.where('notebookId').equals(notebookId).toArray();
-  const items = await db.items.where('notebookId').equals(notebookId).toArray();
-  return build('notebook', { notebooks: [nb], pages, items }, pdfBlobIds(pages), nb.title);
+  const byNb = (t: string) => db.table(t).where('notebookId').equals(notebookId).toArray();
+  const pages = (await byNb('pages')) as Page[];
+  const items = (await byNb('items')) as Item[];
+  const audio = (await byNb('audio')) as AudioClip[];
+  const tables: TableDump = {
+    notebooks: [nb],
+    pages,
+    items,
+    bookmarks: await byNb('bookmarks'),
+    outline: await byNb('outline'),
+    audio,
+  };
+  return build('notebook', tables, blobRefs(pages, items, audio), nb.title);
 }
 
 export interface FederFile {
@@ -173,20 +197,12 @@ export async function restoreBackup(f: FederFile): Promise<void> {
   const db = getDb();
   const previousBlobs = (await db.blobs.toCollection().primaryKeys()) as Id[];
   const restored = await writeBlobs(f, false);
-  const t = f.tables;
-  await db.transaction('rw', [db.folders, db.notebooks, db.pages, db.items, db.settings], async () => {
-    await Promise.all([
-      db.folders.clear(),
-      db.notebooks.clear(),
-      db.pages.clear(),
-      db.items.clear(),
-      db.settings.clear(),
-    ]);
-    await db.folders.bulkPut((t.folders ?? []) as Folder[]);
-    await db.notebooks.bulkPut((t.notebooks ?? []) as Notebook[]);
-    await db.pages.bulkPut((t.pages ?? []) as Page[]);
-    await db.items.bulkPut((t.items ?? []) as Item[]);
-    await db.settings.bulkPut((t.settings ?? []) as Setting[]);
+  const tables = BACKUP_TABLES.map((n) => db.table(n));
+  await db.transaction('rw', tables, async () => {
+    for (const table of tables) {
+      await table.clear();
+      await table.bulkPut((f.tables[table.name] ?? []) as object[]);
+    }
   });
   await deleteUnusedBlobs(previousBlobs.filter((id) => !restored.has(id)));
   await db.meta.put({ key: 'lastBackupAt', value: Date.now() });
@@ -221,12 +237,26 @@ export async function importNotebookFile(f: FederFile, folderId: Id | null): Pro
     openedAt: null,
     deletedAt: null,
   };
+  const remap = <T extends { id: Id; pageId: Id; notebookId: Id }>(rows: unknown[] | undefined) =>
+    ((rows ?? []) as T[])
+      .filter((r) => pageMap.has(r.pageId))
+      .map((r) => ({ ...r, id: newId(), notebookId: nbId, pageId: pageMap.get(r.pageId)! }));
+  const bookmarks = remap<Bookmark>(f.tables.bookmarks);
+  const outline = remap<OutlineEntry>(f.tables.outline);
+  const audio = ((f.tables.audio ?? []) as AudioClip[]).map((a) => ({ ...a, id: newId(), notebookId: nbId }));
   const db = getDb();
-  await db.transaction('rw', db.notebooks, db.pages, db.items, async () => {
-    await db.notebooks.add(notebook);
-    await db.pages.bulkAdd(pages);
-    await db.items.bulkAdd(items);
-  });
+  await db.transaction(
+    'rw',
+    [db.notebooks, db.pages, db.items, db.bookmarks, db.outline, db.audio],
+    async () => {
+      await db.notebooks.add(notebook);
+      await db.pages.bulkAdd(pages);
+      await db.items.bulkAdd(items);
+      await db.bookmarks.bulkAdd(bookmarks);
+      await db.outline.bulkAdd(outline);
+      await db.audio.bulkAdd(audio);
+    },
+  );
   return notebook;
 }
 

@@ -60,7 +60,7 @@ export interface TemplateParams {
 
 export type TemplateRef =
   | { kind: 'builtin'; id: BuiltinTemplateId; params: TemplateParams }
-  | { kind: 'custom'; templateId: Id }
+  | { kind: 'image'; blobId: Id }
   | { kind: 'pdf'; blobId: Id; pageIndex: number };
 
 export interface PaperSpec {
@@ -116,6 +116,12 @@ export interface StrokeItem extends ItemBase {
 
 export type ShapeKind = 'line' | 'arrow' | 'rect' | 'ellipse' | 'triangle' | 'polygon';
 
+/**
+ * Bedeutung von `vertices` je Form:
+ * - line/arrow: [x0, y0, x1, y1] (Pfeilspitze am Ende)
+ * - rect/triangle/polygon: Eckpunkte [x, y, x, y, …] (geschlossen, beliebig gedreht)
+ * - ellipse: [cx, cy, rx, ry]; Drehung in `rotation` (rad)
+ */
 export interface ShapeItem extends ItemBase {
   type: 'shape';
   shape: ShapeKind;
@@ -123,12 +129,16 @@ export interface ShapeItem extends ItemBase {
   rotation: number;
   stroke: string;
   fill: string | null;
+  fillOpacity: number;
   width: number;
   dash: DashStyle;
+  opacity: number;
 }
 
+export type FontFamily = 'sans' | 'serif' | 'mono' | 'hand';
+
 export interface TextStyle {
-  font: string;
+  font: FontFamily;
   size: number;
   color: string;
   align: 'left' | 'center' | 'right';
@@ -136,25 +146,33 @@ export interface TextStyle {
   italic: boolean;
 }
 
-export interface TextItem extends ItemBase {
-  type: 'text';
-  text: string;
-  style: TextStyle;
+/** Elemente mit Rahmen: `box` ist das ungedrehte Rechteck, gedreht wird um dessen Mitte. */
+export interface BoxedItem extends ItemBase {
+  box: Rect;
   rotation: number;
 }
 
-export interface ImageItem extends ItemBase {
+export interface TextItem extends BoxedItem {
+  type: 'text';
+  text: string;
+  style: TextStyle;
+}
+
+export interface ImageItem extends BoxedItem {
   type: 'image';
   blobId: Id;
+  /** Ausschnitt in Bildpixeln */
   crop: Rect;
-  rotation: number;
+  natW: number;
+  natH: number;
 }
 
 export interface TapeItem extends ItemBase {
   type: 'tape';
+  /** Mittellinie [x0, y0, x1, y1] */
   path: number[];
   width: number;
-  pattern: string;
+  color: string;
   covered: boolean;
 }
 
@@ -163,9 +181,11 @@ export type LinkTarget =
   | { kind: 'page'; pageId: Id }
   | { kind: 'notebook'; notebookId: Id; pageId?: Id };
 
+/** Verknüpfung als Bereich auf der Seite (bbox). */
 export interface LinkItem extends ItemBase {
   type: 'link';
   target: LinkTarget;
+  label: string;
 }
 
 export type Item = StrokeItem | ShapeItem | TextItem | ImageItem | TapeItem | LinkItem;
@@ -196,4 +216,87 @@ export interface Setting {
 export interface Meta {
   key: string;
   value: unknown;
+}
+
+// ---------- Ab Schema v2 ----------
+
+/** Gespeicherte Auswahl („Element“/Sticker); Inhalte relativ zu (0,0). */
+export interface ElementDef {
+  id: Id;
+  name: string;
+  items: Item[];
+  width: number;
+  height: number;
+  /** kleine Vorschau als Data-URL */
+  preview: string;
+  createdAt: number;
+}
+
+export interface Bookmark {
+  id: Id;
+  notebookId: Id;
+  pageId: Id;
+  label: string;
+  createdAt: number;
+}
+
+export interface OutlineEntry {
+  id: Id;
+  notebookId: Id;
+  pageId: Id;
+  title: string;
+  level: number;
+  order: number;
+}
+
+/** Durchsuchbarer Text pro Seite und Quelle. */
+export interface TextIndexEntry {
+  id: string; // `${pageId}:${source}`
+  notebookId: Id;
+  pageId: Id;
+  source: 'pdf' | 'text';
+  text: string;
+  tokens: string[];
+}
+
+export interface CustomTemplate {
+  id: Id;
+  name: string;
+  blobId: Id;
+  kind: 'pdf' | 'image';
+  pageIndex: number;
+  width: number;
+  height: number;
+  createdAt: number;
+}
+
+export interface AudioClip {
+  id: Id;
+  notebookId: Id;
+  blobId: Id;
+  /** Startzeit (ms seit Epoch) – passt zu StrokeItem.t0 */
+  startedAt: number;
+  duration: number;
+  mime: string;
+}
+
+export interface Deck {
+  id: Id;
+  name: string;
+  notebookId: Id | null;
+  createdAt: number;
+}
+
+/** Lernkarte: Vorderseite = Bild der Lasso-Auswahl, Rückseite optional Text/Bild. */
+export interface Flashcard {
+  id: Id;
+  deckId: Id;
+  front: string; // Data-URL
+  back: string | null; // Data-URL
+  backText: string;
+  sourcePageId: Id | null;
+  /** Leitner-Fach 1–5 */
+  box: number;
+  due: number;
+  createdAt: number;
 }

@@ -1,6 +1,7 @@
 import type { AppSettings } from '../../model/settings';
-import type { Id, Item, PressureMode, Rect } from '../../model/types';
+import type { Id, Item, PressureMode, Rect, TextItem } from '../../model/types';
 import type { NotebookDoc } from '../doc/NotebookDoc';
+import type { Sim } from '../geometry/transform';
 import type { LiveLayer } from '../render/LiveLayer';
 import type { Camera, PageBox } from '../view/camera';
 
@@ -16,6 +17,16 @@ export interface Sample {
   pointerType: string;
 }
 
+export interface SelectionState {
+  pageId: Id;
+  ids: Set<Id>;
+  /** Vorschau einer laufenden Transformation (Verschieben/Skalieren/Drehen) */
+  preview: Sim | null;
+}
+
+export type SelectionHandle =
+  { kind: 'inside' } | { kind: 'scale' } | { kind: 'rotate' } | { kind: 'vertex'; index: number };
+
 export interface ToolHost {
   readonly doc: NotebookDoc;
   readonly camera: Camera;
@@ -26,6 +37,17 @@ export interface ToolHost {
   pageBox(pageId: Id): PageBox | undefined;
   /** Zeigt eine Seite vorübergehend mit ausgeblendeten/zusätzlichen Elementen. */
   preview(pageId: Id, hidden: ReadonlySet<Id>, extra: readonly Item[], region: Rect): void;
+
+  // Auswahl (nur im Haupt-Editor vorhanden)
+  readonly selection?: SelectionState | null;
+  setSelection?(pageId: Id, ids: Iterable<Id>): void;
+  clearSelection?(): void;
+  selectionHandleAt?(sx: number, sy: number): SelectionHandle | null;
+  setSelectionPreview?(t: Sim | null): void;
+  /** Textbearbeitung beginnen (neues oder vorhandenes Textfeld). */
+  startTextEdit?(item: TextItem, isNew: boolean): void;
+  /** Kreis um Inhalte gezogen → Auswahl anbieten. */
+  offerLasso?(pageId: Id, polygon: number[], strokeId: Id): void;
 }
 
 export interface Tool {

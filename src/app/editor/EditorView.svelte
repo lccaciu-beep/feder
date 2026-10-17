@@ -2,19 +2,33 @@
   import { onMount } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import Menu, { type MenuItem } from '../components/Menu.svelte';
+  import PromptDialog from '../components/PromptDialog.svelte';
   import ToolOptions from './ToolOptions.svelte';
   import Sidebar from './Sidebar.svelte';
   import PaperDialog from './PaperDialog.svelte';
+  import SelectionBar from './SelectionBar.svelte';
+  import TextEditor from './TextEditor.svelte';
+  import ElementsPopover from './ElementsPopover.svelte';
+  import CropDialog from './CropDialog.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
   import { insertPdfPages } from '../../pdf/import';
-  import { Editor, type EditorState, type ToolId } from '../../engine/Editor';
+  import {
+    Editor,
+    type EditorState,
+    type SelectionInfo,
+    type TextEditInfo,
+    type ToolId,
+  } from '../../engine/Editor';
   import { NotebookDoc } from '../../engine/doc/NotebookDoc';
   import { getDb } from '../../storage/db';
   import { touchOpened } from '../../storage/library';
+  import { saveElement } from '../../storage/elements';
+  import { shareOrDownload } from '../../io/share';
+  import { safeFileName } from '../../io/backup';
   import { router } from '../stores/router.svelte';
   import { settings } from '../stores/settings.svelte';
   import { toasts } from '../stores/toast.svelte';
-  import type { Id } from '../../model/types';
+  import type { Id, ImageItem, PaperSpec } from '../../model/types';
 
   let { id, initialPage, onsettings }: { id: Id; initialPage?: number; onsettings: () => void } = $props();
 
@@ -31,26 +45,14 @@
   let paperFor = $state<Id | null>(null);
   let showExport = $state(false);
   let pdfInput = $state<HTMLInputElement>();
-
-  async function onPdfPicked(e: Event) {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file || !doc || !editor) return;
-    const busy = toasts.show(`Füge „${file.name}“ ein …`, { sticky: true });
-    try {
-      const index = (st?.pageIndex ?? 0) + 1;
-      const pages = await insertPdfPages(doc, file, index);
-      editor.goToPage(index);
-      toasts.show(`${pages.length} ${pages.length === 1 ? 'Seite' : 'Seiten'} eingefügt`);
-    } catch (err) {
-      toasts.show(`PDF konnte nicht eingefügt werden: ${err instanceof Error ? err.message : String(err)}`, {
-        ms: 6000,
-      });
-    } finally {
-      toasts.dismiss(busy);
-    }
-  }
+  let imageInput = $state<HTMLInputElement>();
+  let selection = $state.raw<SelectionInfo | null>(null);
+  let textEdit = $state.raw<TextEditInfo | null>(null);
+  let lassoOffer = $state<{ x: number; y: number } | null>(null);
+  let zoomWin = $state<{ height: number } | null>(null);
+  let elementsAt = $state<{ x: number; y: number } | null>(null);
+  let saveElementOpen = $state(false);
+  let cropItem = $state.raw<ImageItem | null>(null);
   let error = $state<string | null>(null);
   let zoomHint = $state<string | null>(null);
   let zoomTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,6 +80,14 @@
           }),
         );
         cleanups.push(
+          ed.onEvent((e) => {
+            if (e.type === 'selection') selection = e.info;
+            else if (e.type === 'textEdit') textEdit = e.info;
+            else if (e.type === 'lassoOffer') lassoOffer = e.info;
+            else if (e.type === 'zoomWindow') zoomWin = e.info;
+          }),
+        );
+        cleanups.push(
           d.on((c) => {
             if (c.structure) pageIds = [...d.pageIds];
             const next = { ...versions };
@@ -92,13 +102,18 @@
           }),
         );
         // Beim Verlassen der App sofort speichern.
-        const flush = () => void d.autosave.flush();
+        const flush = () => {
+          ed.finishTextEdit();
+          void d.autosave.flush();
+        };
         const onVis = () => document.visibilityState === 'hidden' && flush();
         document.addEventListener('visibilitychange', onVis);
         window.addEventListener('pagehide', flush);
+        window.addEventListener('paste', onPaste);
         cleanups.push(() => {
           document.removeEventListener('visibilitychange', onVis);
           window.removeEventListener('pagehide', flush);
+          window.removeEventListener('paste', onPaste);
         });
       } catch (err) {
         error = err instanceof Error ? err.message : String(err);
@@ -107,6 +122,7 @@
     return () => {
       disposed = true;
       for (const c of cleanups) c();
+      editor?.finishTextEdit();
       editor?.destroy();
     };
   });
@@ -145,6 +161,7 @@
   }
 
   function back() {
+    editor?.finishTextEdit();
     void doc?.autosave.flush();
     router.go({ name: 'library', section: 'docs', folderId: doc?.notebook.folderId ?? null });
   }
@@ -154,6 +171,56 @@
     const index = st.pageIndex + 1;
     doc.addPage(index);
     editor.goToPage(index);
+  }
+
+  async function onPdfPicked(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || !doc || !editor) return;
+    const busy = toasts.show(`Füge „${file.name}“ ein …`, { sticky: true });
+    try {
+      const index = (st?.pageIndex ?? 0) + 1;
+      const pages = await insertPdfPages(doc, file, index);
+      editor.goToPage(index);
+      toasts.show(`${pages.length} ${pages.length === 1 ? 'Seite' : 'Seiten'} eingefügt`);
+    } catch (err) {
+      toasts.show(`PDF konnte nicht eingefügt werden: ${err instanceof Error ? err.message : String(err)}`, {
+        ms: 6000,
+      });
+    } finally {
+      toasts.dismiss(busy);
+    }
+  }
+
+  async function onImagePicked(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    for (const f of files) await insertImage(f);
+  }
+
+  async function insertImage(file: Blob) {
+    try {
+      await editor?.insertImage(file);
+    } catch (err) {
+      toasts.show(`Bild konnte nicht eingefügt werden: ${err instanceof Error ? err.message : String(err)}`, {
+        ms: 6000,
+      });
+    }
+  }
+
+  /** Bilder aus der Zwischenablage einfügen (⌘V). */
+  function onPaste(e: ClipboardEvent) {
+    if (!editor || typing(e) || textEdit) return;
+    const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith('image/'));
+    if (file) {
+      e.preventDefault();
+      void insertImage(file);
+    } else if (editor.canPaste) {
+      e.preventDefault();
+      editor.paste();
+    }
   }
 
   function moreMenu(e: MouseEvent) {
@@ -181,7 +248,7 @@
     };
   }
 
-  function applyPaper(pageId: Id, paper: import('../../model/types').PaperSpec, scope: 'page' | 'all') {
+  function applyPaper(pageId: Id, paper: PaperSpec, scope: 'page' | 'all') {
     if (!doc) return;
     // „Alle Seiten“ lässt importierte PDF-Seiten unangetastet.
     const ids =
@@ -191,13 +258,37 @@
     doc.setPaper(ids, paper, scope === 'all');
   }
 
-  function typing(e: KeyboardEvent) {
+  async function shareSelectionImage() {
+    const blob = await editor?.selectionImage();
+    if (!blob) return;
+    const r = await shareOrDownload(blob, safeFileName(`${title} – Auswahl`, 'png'));
+    if (r === 'downloaded') toasts.show('Bild wurde heruntergeladen.');
+  }
+
+  async function storeElement(name: string) {
+    if (!editor) return;
+    const items = editor.selectedItems();
+    try {
+      await saveElement(name, items, await editor.selectionImage(1));
+      toasts.show(`Element „${name}“ gespeichert`);
+    } catch (err) {
+      toasts.show(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function toggleZoomWindow() {
+    if (!editor) return;
+    if (editor.zoomWindowOpen) editor.closeZoomWindow();
+    else editor.openZoomWindow();
+  }
+
+  function typing(e: Event) {
     const t = e.target as HTMLElement | null;
     return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (!editor || typing(e) || paperFor) return;
+    if (!editor || typing(e) || paperFor || showExport || cropItem || saveElementOpen) return;
     const mod = e.metaKey || e.ctrlKey;
     const k = e.key.toLowerCase();
     if (mod && k === 'z') {
@@ -219,22 +310,65 @@
     } else if (mod && k === '0') {
       e.preventDefault();
       editor.fitWidth();
+    } else if (mod && k === 'a') {
+      e.preventDefault();
+      editor.selectAll();
+    } else if (mod && k === 'c' && selection) {
+      e.preventDefault();
+      editor.copySelection();
+    } else if (mod && k === 'x' && selection) {
+      e.preventDefault();
+      editor.cutSelection();
+    } else if (mod && k === 'd' && selection) {
+      e.preventDefault();
+      editor.duplicateSelection();
     } else if (!mod && !e.altKey) {
-      if (k === 'p') setTool('pen');
-      else if (k === 'h') setTool('highlighter');
-      else if (k === 'e') setTool('eraser');
-      else if (k === 'arrowright' || k === 'pagedown') editor.goToPage((st?.pageIndex ?? 0) + 1);
+      const map: Record<string, ToolId> = {
+        p: 'pen',
+        h: 'highlighter',
+        e: 'eraser',
+        l: 'lasso',
+        s: 'shape',
+        t: 'text',
+        b: 'tape',
+        x: 'laser',
+      };
+      if (map[k]) setTool(map[k]);
+      else if ((k === 'backspace' || k === 'delete') && selection) {
+        e.preventDefault();
+        editor.deleteSelection();
+      } else if (k === 'arrowright' || k === 'pagedown') editor.goToPage((st?.pageIndex ?? 0) + 1);
       else if (k === 'arrowleft' || k === 'pageup') editor.goToPage((st?.pageIndex ?? 0) - 1);
       else if (k === 'home') editor.goToPage(0);
       else if (k === 'end') editor.goToPage(pageIds.length - 1);
-      else if (k === 'escape') showSidebar = false;
+      else if (k === 'escape') {
+        if (selection) editor.clearSelection();
+        else showSidebar = false;
+      }
     }
   }
 
-  const tools: { id: ToolId; label: string; icon: () => string; key: string }[] = [
-    { id: 'pen', label: 'Stift', icon: () => settings.value.pen.kind, key: 'P' },
-    { id: 'highlighter', label: 'Textmarker', icon: () => 'highlighter', key: 'H' },
+  const tools: { id: ToolId; label: string; icon: () => string; key: string; ink?: () => string }[] = [
+    {
+      id: 'pen',
+      label: 'Stift',
+      icon: () => settings.value.pen.kind,
+      key: 'P',
+      ink: () => settings.value.pen.color,
+    },
+    {
+      id: 'highlighter',
+      label: 'Textmarker',
+      icon: () => 'highlighter',
+      key: 'H',
+      ink: () => settings.value.highlighter.color,
+    },
     { id: 'eraser', label: 'Radierer', icon: () => 'eraser', key: 'E' },
+    { id: 'lasso', label: 'Lasso', icon: () => 'lasso', key: 'L' },
+    { id: 'shape', label: 'Formen', icon: () => 'shapes', key: 'S', ink: () => settings.value.shape.color },
+    { id: 'text', label: 'Text', icon: () => 'text', key: 'T' },
+    { id: 'tape', label: 'Tape', icon: () => 'tape', key: 'B', ink: () => settings.value.tape.color },
+    { id: 'laser', label: 'Laserpointer', icon: () => 'laser', key: 'X' },
   ];
 
   const saveLabel = $derived(
@@ -250,6 +384,7 @@
 
 <div class="editor-shell">
   <input bind:this={pdfInput} type="file" accept="application/pdf,.pdf" hidden onchange={onPdfPicked} />
+  <input bind:this={imageInput} type="file" accept="image/*" multiple hidden onchange={onImagePicked} />
   <div class="canvas-host" bind:this={host}></div>
 
   <div class="bars" bind:this={barEl}>
@@ -276,16 +411,31 @@
             aria-pressed={st?.tool === t.id}
           >
             <Icon name={t.icon()} />
-            {#if t.id !== 'eraser'}
-              <span
-                class="ink"
-                style:background={t.id === 'pen'
-                  ? settings.value.pen.color
-                  : settings.value.highlighter.color}
-              ></span>
+            {#if t.ink}
+              <span class="ink" style:background={t.ink()}></span>
             {/if}
           </button>
         {/each}
+        <span class="sep"></span>
+        <button class="icon-btn" onclick={() => imageInput?.click()} aria-label="Bild einfügen"
+          ><Icon name="image" /></button
+        >
+        <button
+          class="icon-btn"
+          class:on={!!elementsAt}
+          onclick={(e) => {
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            elementsAt = elementsAt ? null : { x: r.left - 140, y: r.bottom + 8 };
+          }}
+          aria-label="Elemente"><Icon name="sticker" /></button
+        >
+        <button
+          class="icon-btn"
+          class:on={!!zoomWin}
+          onclick={toggleZoomWindow}
+          aria-label="Zoom-Fenster"
+          aria-pressed={!!zoomWin}><Icon name="magnifier" /></button
+        >
         <span class="sep"></span>
         <button
           class="icon-btn"
@@ -312,10 +462,49 @@
     </div>
     {#if st}
       <div class="sub">
-        <ToolOptions tool={st.tool} />
+        <ToolOptions tool={st.tool} {editor} />
       </div>
     {/if}
   </div>
+
+  {#if editor && selection && !textEdit}
+    <SelectionBar
+      {editor}
+      info={selection}
+      onsaveelement={() => (saveElementOpen = true)}
+      onshareimage={() => void shareSelectionImage()}
+      oncrop={() => (cropItem = selection?.single?.type === 'image' ? selection.single : null)}
+    />
+  {/if}
+
+  {#if editor && textEdit}
+    <TextEditor {editor} info={textEdit} />
+  {/if}
+
+  {#if lassoOffer}
+    <button
+      class="offer"
+      style:left="{lassoOffer.x + 8}px"
+      style:top="{Math.max(70, lassoOffer.y - 44)}px"
+      onclick={() => editor?.acceptLassoOffer()}
+    >
+      <Icon name="lasso" size={18} /> Auswählen
+    </button>
+  {/if}
+
+  {#if zoomWin}
+    <div class="zoom-controls" style:bottom="{zoomWin.height + 10}px">
+      <button class="btn" onclick={() => editor?.zoomWindowNewLine()}
+        ><Icon name="new-line" size={18} /> Neue Zeile</button
+      >
+      <button class="btn" onclick={() => editor?.zoomWindowAdvance()}
+        ><Icon name="arrow-right" size={18} /> Weiter</button
+      >
+      <button class="btn" onclick={() => editor?.closeZoomWindow()} aria-label="Zoom-Fenster schließen"
+        ><Icon name="close" size={18} /></button
+      >
+    </div>
+  {/if}
 
   {#if showSidebar && doc}
     <Sidebar
@@ -329,7 +518,7 @@
     />
   {/if}
 
-  {#if st}
+  {#if st && !zoomWin}
     <button class="pager" onclick={() => (showSidebar = !showSidebar)} aria-label="Seitenübersicht öffnen">
       {zoomHint ?? `${st.pageIndex + 1} / ${st.pageCount}`}
     </button>
@@ -345,6 +534,44 @@
 
 {#if menu}
   <Menu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
+
+{#if elementsAt && editor}
+  {@const ed = editor}
+  <ElementsPopover
+    x={elementsAt.x}
+    y={elementsAt.y}
+    onpick={(def) => ed.insertElement(def)}
+    onclose={() => (elementsAt = null)}
+  />
+{/if}
+
+{#if saveElementOpen}
+  <PromptDialog
+    title="Als Element speichern"
+    value="Element"
+    confirm="Speichern"
+    onclose={() => (saveElementOpen = false)}
+    onsubmit={(name) => void storeElement(name)}
+  />
+{/if}
+
+{#if cropItem && editor}
+  {@const ed = editor}
+  {@const img = cropItem}
+  <CropDialog
+    item={img}
+    onclose={() => (cropItem = null)}
+    onapply={(crop) => {
+      const k = img.box.w / img.crop.w;
+      const w = crop.w * k;
+      const h = crop.h * k;
+      ed.updateItems(
+        [{ before: img, after: { ...img, crop, box: { x: img.box.x, y: img.box.y, w, h } } }],
+        'Zuschneiden',
+      );
+    }}
+  />
 {/if}
 
 {#if showExport && doc}
@@ -399,7 +626,7 @@
   .bar {
     width: 100%;
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
     padding: 4px 6px;
@@ -417,6 +644,14 @@
     gap: 2px;
     min-width: 0;
   }
+  .left {
+    max-width: 260px;
+  }
+  .center {
+    justify-content: safe center;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
   .right {
     justify-content: flex-end;
   }
@@ -432,18 +667,26 @@
     position: relative;
     display: grid;
     place-items: center;
-    width: 48px;
+    width: 44px;
     height: 44px;
     border-radius: 12px;
+    flex: none;
   }
   .tool.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .center .icon-btn {
+    flex: none;
+  }
+  .center .icon-btn.on {
     background: var(--accent-soft);
     color: var(--accent);
   }
   /* Tintenfarbe als kleiner Tropfen am Werkzeug */
   .ink {
     position: absolute;
-    right: 7px;
+    right: 6px;
     bottom: 6px;
     width: 9px;
     height: 9px;
@@ -453,8 +696,9 @@
   .sep {
     width: 1px;
     height: 24px;
-    margin: 0 6px;
+    margin: 0 4px;
     background: var(--line);
+    flex: none;
   }
   .save {
     font: 12px var(--font-ui);
@@ -465,6 +709,30 @@
   .save.err {
     color: var(--danger);
     font-weight: 600;
+  }
+  .offer {
+    position: absolute;
+    z-index: 15;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font: 600 14px var(--font-ui);
+    box-shadow: var(--shadow-lift);
+  }
+  .zoom-controls {
+    position: absolute;
+    right: calc(12px + var(--safe-right));
+    display: flex;
+    gap: 8px;
+    z-index: 12;
+  }
+  .zoom-controls .btn {
+    box-shadow: var(--shadow-lift);
+    background: var(--surface);
   }
   .pager {
     position: absolute;
@@ -495,13 +763,16 @@
     z-index: 30;
     font-family: var(--font-ui);
   }
-  @media (max-width: 760px) {
+  @media (max-width: 900px) {
     .title,
     .save {
       display: none;
     }
+    .left {
+      max-width: none;
+    }
     .tool {
-      width: 42px;
+      width: 40px;
     }
   }
 </style>

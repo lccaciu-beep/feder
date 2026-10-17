@@ -2,9 +2,10 @@
 // Änderungen werden während des Radierens nur angezeigt und am Ende als
 // ein einziger Befehl übernommen.
 
-import type { Id, Item, Rect, StrokeItem } from '../../model/types';
+import type { Id, Item, Rect, ShapeItem, StrokeItem } from '../../model/types';
 import { strokeFromPiece } from '../ink/capture';
-import { eraseFromStroke, strokeHitsCapsule } from '../geometry/hit';
+import { distToSegmentSq, eraseFromStroke, strokeHitsCapsule } from '../geometry/hit';
+import { itemHitPoint } from '../geometry/transform';
 import { union } from '../geometry/rect';
 import type { PageBox } from '../view/camera';
 import { toPage, type Sample, type Tool, type ToolHost } from './types';
@@ -61,6 +62,23 @@ export class EraserTool implements Tool {
       if (it.type === 'stroke' && !this.hidden.has(it.id)) candidates.push(it);
     }
     candidates.push(...this.pieces.values());
+
+    // Formen und Tape werden immer als Ganzes entfernt.
+    if (!onlyHl) {
+      const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / Math.max(1, r)));
+      for (const it of this.originals.values()) {
+        if ((it.type !== 'shape' && it.type !== 'tape') || this.hidden.has(it.id)) continue;
+        for (let k = 0; k <= steps; k++) {
+          const x = a[0] + ((b[0] - a[0]) * k) / steps;
+          const y = a[1] + ((b[1] - a[1]) * k) / steps;
+          if (itemHitPoint(it, x, y, r) && (it.type === 'tape' || shapeNear(it, x, y, r))) {
+            this.hidden.add(it.id);
+            this.region = union(this.region, it.bbox);
+            break;
+          }
+        }
+      }
+    }
 
     for (const s of candidates) {
       if (onlyHl && s.tool !== 'highlighter') continue;
@@ -139,4 +157,27 @@ export class EraserTool implements Tool {
     this.region = null;
     this.host.live.clear();
   }
+}
+
+/** Liegt (x, y) nahe der Kontur einer Form? (Gefüllte Formen auch im Inneren.) */
+function shapeNear(s: ShapeItem, x: number, y: number, r: number): boolean {
+  const reach = (r + s.width / 2) ** 2;
+  const v = s.vertices;
+  if (s.shape === 'ellipse') {
+    const [cx, cy, rx, ry] = v as [number, number, number, number];
+    const c = Math.cos(-s.rotation);
+    const sn = Math.sin(-s.rotation);
+    const u = (x - cx) * c - (y - cy) * sn;
+    const w = (x - cx) * sn + (y - cy) * c;
+    const d = Math.hypot(u / Math.max(rx, 1e-3), w / Math.max(ry, 1e-3));
+    if (s.fill && d <= 1) return true;
+    return Math.abs(d - 1) * Math.min(rx, ry) <= Math.sqrt(reach);
+  }
+  const closed = s.shape !== 'line' && s.shape !== 'arrow';
+  const n = v.length / 2;
+  for (let i = 0; i < n - (closed ? 0 : 1); i++) {
+    const j = (i + 1) % n;
+    if (distToSegmentSq(x, y, v[i * 2]!, v[i * 2 + 1]!, v[j * 2]!, v[j * 2 + 1]!) <= reach) return true;
+  }
+  return false;
 }

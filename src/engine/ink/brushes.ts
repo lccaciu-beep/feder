@@ -195,17 +195,6 @@ export function drawStroke(ctx: Ctx, s: StrokeItem): void {
   ctx.globalAlpha = 1;
 }
 
-/** Zeichnet Inhalte in der richtigen Reihenfolge: Textmarker zuerst, darüber die Tinte. */
-export function drawItems(ctx: Ctx, items: readonly Item[], filter?: (it: Item) => boolean): void {
-  for (const it of items) {
-    if (it.type === 'stroke' && it.tool === 'highlighter' && (!filter || filter(it))) drawStroke(ctx, it);
-  }
-  for (const it of items) {
-    if (filter && !filter(it)) continue;
-    if (it.type === 'stroke' && it.tool !== 'highlighter') drawStroke(ctx, it);
-  }
-}
-
 export function isHighlighter(it: Item): boolean {
   return it.type === 'stroke' && it.tool === 'highlighter';
 }

@@ -1,8 +1,13 @@
-// Stift und Textmarker. Zeichnet live auf die Live-Ebene, erkennt
-// „zeichnen und halten“ (gerade Linie) und Zickzack-Löschen.
+// Stift, Textmarker und Formen-Werkzeug. Zeichnet live auf die Live-Ebene,
+// erkennt „zeichnen und halten“ (Linie oder Form), Zickzack-Löschen und
+// Kreise um Inhalte (Auswahl anbieten).
 
 import { getStroke } from 'perfect-freehand';
 import type { Id, StrokeItem } from '../../model/types';
+import { recognizeShape, type Recognized } from '../geometry/shapes';
+import { itemInPolygon } from '../geometry/transform';
+import { shapePath } from '../render/items';
+import { makeShape, type ShapeStyle } from './factory';
 import { applyInkStyle, centerlinePath, outlineToPath, strokeOptions, toFreehandInput } from '../ink/brushes';
 import { StrokeBuilder, type StrokeStyle } from '../ink/capture';
 import { isZigzag, zigzagTargets } from '../geometry/hit';
@@ -25,11 +30,20 @@ export class InkTool implements Tool {
   private lastScreen = { sx: 0, sy: 0 };
   private last: [number, number] = [0, 0];
   private dirty = false;
+  /** Erkannte Form (Formen-Werkzeug oder Stift nach Halten) */
+  private shapePreview: Recognized | null = null;
 
   constructor(
     private readonly host: ToolHost,
-    readonly kind: 'pen' | 'highlighter',
+    readonly kind: 'pen' | 'highlighter' | 'shape',
   ) {}
+
+  private shapeStyle(): ShapeStyle {
+    const s = this.host.settings;
+    return this.kind === 'shape'
+      ? { color: s.shape.color, width: s.shape.width, dash: s.shape.dash, fill: s.shape.fill }
+      : { color: s.pen.color, width: s.pen.width, dash: s.pen.dash, fill: false };
+  }
 
   get active(): boolean {
     return !!this.builder;
@@ -44,6 +58,16 @@ export class InkTool implements Tool {
         width: s.highlighter.width,
         opacity: 0.4,
         dash: 'solid',
+        pressureMode: 'none',
+      };
+    }
+    if (this.kind === 'shape') {
+      return {
+        tool: 'ballpoint',
+        color: s.shape.color,
+        width: s.shape.width,
+        opacity: 1,
+        dash: s.shape.dash,
         pressureMode: 'none',
       };
     }
@@ -74,6 +98,7 @@ export class InkTool implements Tool {
     this.screenLength = 0;
     this.lastScreen = { sx: s.sx, sy: s.sy };
     this.predicted = [];
+    this.shapePreview = null;
     this.host.live.setBlend(this.kind === 'highlighter' ? 'multiply' : 'normal');
     this.addSample(s);
     this.dirty = true;
@@ -85,6 +110,7 @@ export class InkTool implements Tool {
     this.last = [x, y];
     this.screenLength += Math.hypot(s.sx - this.lastScreen.sx, s.sy - this.lastScreen.sy);
     this.lastScreen = { sx: s.sx, sy: s.sy };
+    if (this.shapePreview) return;
     if (this.straight && b.count >= 1) {
       b.straighten(x, y);
       return;
@@ -119,13 +145,17 @@ export class InkTool implements Tool {
     if (!b) return;
     if (
       !this.straight &&
-      this.kind === 'pen' &&
-      this.host.settings.holdToStraighten &&
+      !this.shapePreview &&
+      (this.kind === 'shape' || (this.kind === 'pen' && this.host.settings.holdToStraighten)) &&
       now - this.hold.t > HOLD_MS &&
       this.screenLength > HOLD_MIN_LENGTH_PX
     ) {
-      this.straight = true;
-      b.straighten(this.last[0], this.last[1]);
+      const rec = recognizeShape(b.points, b.stride);
+      if (rec && rec.shape !== 'line') this.shapePreview = rec;
+      else {
+        this.straight = true;
+        b.straighten(this.last[0], this.last[1]);
+      }
       this.predicted = [];
       this.dirty = true;
     }
@@ -149,6 +179,24 @@ export class InkTool implements Tool {
     const [ox, oy] = camera.toScreen(box.x, box.y);
     const s = camera.scale;
     live.clear();
+    if (this.shapePreview) {
+      const st = this.shapeStyle();
+      const shape = makeShape(this.shapePreview, st, { pageId: this.pageId, notebookId: '', z: 0 });
+      const r = shape.bbox;
+      const sctx = live.begin(ox, oy, s, {
+        x: ox + r.x * s - 4,
+        y: oy + r.y * s - 4,
+        w: r.w * s + 8,
+        h: r.h * s + 8,
+      });
+      sctx.strokeStyle = st.color;
+      sctx.lineWidth = st.width;
+      sctx.lineJoin = 'round';
+      sctx.lineCap = 'round';
+      sctx.stroke(shapePath(shape));
+      this.dirty = false;
+      return;
+    }
     const ctx = live.begin(ox, oy, s, {
       x: ox + bbox.x * s,
       y: oy + bbox.y * s,
@@ -191,19 +239,62 @@ export class InkTool implements Tool {
       }
     }
 
-    const item = b.build({ pageId, notebookId: doc.id, z: doc.topZ(pageId) + 1 });
+    const at = { pageId, notebookId: doc.id, z: doc.topZ(pageId) + 1 };
+    const rec =
+      this.shapePreview ??
+      (this.kind === 'shape' && !this.straight ? recognizeShape(b.points, b.stride) : null);
+    if (rec || (this.kind === 'shape' && this.straight)) {
+      const shape = makeShape(
+        rec ?? {
+          shape: 'line',
+          vertices: [...b.points.slice(0, 2), ...b.points.slice(-b.stride, -b.stride + 2)],
+          rotation: 0,
+        },
+        this.shapeStyle(),
+        at,
+      );
+      doc.execute({ label: 'Form', items: [{ before: null, after: shape }], pages: [] });
+      live.clear();
+      return;
+    }
+
+    const item = b.build(at);
+    const offer =
+      this.kind === 'pen' && !this.straight && settings.circleToLasso ? this.lassoCandidate(b, pageId) : null;
     // Erst den fertigen Strich in den Cache zeichnen lassen, dann die Live-Ebene leeren –
     // beides im selben Task, damit nichts flackert.
     doc.execute({
-      label: this.kind === 'pen' ? 'Stift' : 'Textmarker',
+      label: this.kind === 'highlighter' ? 'Textmarker' : 'Stift',
       items: [{ before: null, after: item }],
       pages: [],
     });
     live.clear();
+    if (offer) this.host.offerLasso?.(pageId, offer, item.id);
+  }
+
+  /** Geschlossene Schleife um vorhandene Inhalte? Dann Polygon zurückgeben. */
+  private lassoCandidate(b: StrokeBuilder, pageId: Id): number[] | null {
+    const st = b.stride;
+    const pts = b.points;
+    const n = pts.length / st;
+    if (n < 12) return null;
+    const box = pointsBBox(pts, st, 0);
+    const diag = Math.hypot(box.w, box.h);
+    if (diag < 30) return null;
+    const gap = Math.hypot(pts[0]! - pts[(n - 1) * st]!, pts[1]! - pts[(n - 1) * st + 1]!);
+    let len = 0;
+    for (let i = 1; i < n; i++)
+      len += Math.hypot(pts[i * st]! - pts[(i - 1) * st]!, pts[i * st + 1]! - pts[(i - 1) * st + 1]!);
+    if (gap > diag * 0.2 || len < diag * 1.8) return null;
+    const poly: number[] = [];
+    for (let i = 0; i < n; i++) poly.push(pts[i * st]!, pts[i * st + 1]!);
+    const inside = (this.host.doc.getItems(pageId) ?? []).some((it) => itemInPolygon(it, poly));
+    return inside ? poly : null;
   }
 
   cancel(): void {
     this.builder = null;
+    this.shapePreview = null;
     this.host.live.clear();
   }
 }

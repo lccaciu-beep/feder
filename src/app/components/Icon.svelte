@@ -46,6 +46,36 @@
     scroll: '<path d="M12 4v16M8.5 7.5L12 4l3.5 3.5M8.5 16.5L12 20l3.5-3.5"/>',
     'scroll-h': '<path d="M4 12h16M7.5 8.5L4 12l3.5 3.5M16.5 8.5L20 12l-3.5 3.5"/>',
     notebook: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 3.5v17"/>',
+    lasso:
+      '<path d="M12 4c4.7 0 8.5 2.4 8.5 5.5S16.7 15 12 15c-1.5 0-3-.3-4.2-.7"/><path d="M5.3 12.6C4.2 11.7 3.5 10.6 3.5 9.5 3.5 6.4 7.3 4 12 4" stroke-dasharray="2.5 2.5"/><path d="M7.8 14.3c-.9 1.4-.6 3.1.6 3.9 1.3.8 1.4 2.3.4 3.3"/>',
+    shapes: '<rect x="3.5" y="11" width="9" height="9" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/>',
+    text: '<path d="M5 6.5V5h14v1.5M12 5v14M9 19h6"/>',
+    tape: '<path d="M4.5 15.5l9-9 4.5 4.5-9 9z"/><path d="M7.5 12.5l4.5 4.5M10.5 9.5l4.5 4.5" stroke-dasharray="1.5 2"/><path d="M14.5 5.5l1-1 4.5 4.5-1 1"/>',
+    laser:
+      '<circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
+    image:
+      '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5L20 17"/>',
+    sticker:
+      '<path d="M20 12.5V6.5a2.5 2.5 0 00-2.5-2.5h-11A2.5 2.5 0 004 6.5v11A2.5 2.5 0 006.5 20h6"/><path d="M20 12.5L12.5 20c0-4.1 3.4-7.5 7.5-7.5z"/><circle cx="9.5" cy="10" r="1" fill="currentColor"/><circle cx="14.5" cy="10" r="1" fill="currentColor"/>',
+    magnifier:
+      '<rect x="3.5" y="14" width="17" height="6.5" rx="1.5"/><path d="M7 4h10v6.5H7z" stroke-dasharray="2 2"/><path d="M12 10.5V14"/>',
+    crop: '<path d="M7 3v14h14"/><path d="M3 7h14v14"/>',
+    'rotate-right': '<path d="M20 11a8 8 0 10-2.6 5.9"/><path d="M20 4.5v6.5h-6.5"/>',
+    palette:
+      '<path d="M12 3.5a8.5 8.5 0 100 17c1.2 0 1.8-.8 1.8-1.7 0-1.2-1-1.6-1-2.6 0-1 .8-1.7 1.9-1.7H17a3.5 3.5 0 003.5-3.5C20.5 7 16.7 3.5 12 3.5z"/><circle cx="7.5" cy="11" r="1" fill="currentColor"/><circle cx="10" cy="7.5" r="1" fill="currentColor"/><circle cx="14.5" cy="7.5" r="1" fill="currentColor"/>',
+    cut: '<circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path d="M8.3 15.7L17 4M15.7 15.7L7 4"/>',
+    paste: '<rect x="5" y="4.5" width="14" height="16" rx="2"/><path d="M9 4.5V3.5h6v1M9 10h6M9 14h6"/>',
+    bold: '<path d="M7 5h6a3.5 3.5 0 010 7H7zM7 12h7a3.5 3.5 0 010 7H7z"/>',
+    italic: '<path d="M10 5h8M6 19h8M14 5l-4 14"/>',
+    'align-left': '<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',
+    'align-center': '<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',
+    'align-right': '<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',
+    fill: '<path d="M12 3.5l7 7-7 7-7-7z" fill="currentColor" fill-opacity="0.25"/>',
+    'arrow-right': '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    'new-line': '<path d="M19 6v5a3 3 0 01-3 3H5"/><path d="M9 10l-4 4 4 4"/>',
+    flashcard:
+      '<rect x="3.5" y="6" width="14" height="11" rx="1.5"/><path d="M7 3.5h12a1.5 1.5 0 011.5 1.5v9"/>',
+    select: '<path d="M4 4h4M12 4h4M20 4v4M20 12v4M20 20h-4M12 20H8M4 20v-4M4 12V8"/>',
     share:
       '<path d="M12 15V3.5M8 7.5l4-4 4 4"/><path d="M7.5 11H6a2 2 0 00-2 2v6a2 2 0 002 2h12a2 2 0 002-2v-6a2 2 0 00-2-2h-1.5"/>',
     download: '<path d="M12 4v11.5M8 11.5l4 4 4-4"/><path d="M5 20h14"/>',

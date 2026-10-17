@@ -244,3 +244,23 @@ select:focus-visible,
     animation-duration: 0.01ms !important;
   }
 }
+
+.feder-zoom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  background: #ffffff;
+  border-top: 2px solid var(--accent);
+  box-shadow: 0 -6px 20px rgba(22, 32, 58, 0.16);
+  touch-action: none;
+  overflow: hidden;
+}
+
+.feder-zoom-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}

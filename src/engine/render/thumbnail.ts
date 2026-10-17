@@ -1,7 +1,7 @@
 import type { Item, PaperSpec } from '../../model/types';
 import { drawPaper } from '../../templates/draw';
 import { renderPdfRegion } from '../../pdf/pdfjs';
-import { drawItems } from '../ink/brushes';
+import { drawItems } from './items';
 
 /**
  * Zeichnet eine Seite vollständig (Hintergrund inkl. PDF + Inhalte) in einen
