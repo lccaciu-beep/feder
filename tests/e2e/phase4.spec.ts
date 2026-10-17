@@ -106,6 +106,30 @@ test('Link auf eine andere Seite anlegen und antippen', async ({ page }) => {
   await page.getByRole('spinbutton').fill('2');
   await page.getByRole('button', { name: 'Link anlegen' }).click();
   await expect(page.locator('.pager')).toHaveText('1 / 2');
-  await fingerTap(page, 330, 425);
+  // Mitte des Links aus den gespeicherten Daten auf den Bildschirm umrechnen
+  await page.waitForTimeout(600);
+  const target = await page.evaluate(
+    () =>
+      new Promise<{ x: number; y: number }>((resolve) => {
+        const req = indexedDB.open('feder');
+        req.onsuccess = () => {
+          const r = req.result.transaction('items').objectStore('items').getAll();
+          r.onsuccess = () => {
+            const link = r.result.find((it: { type: string }) => it.type === 'link') as {
+              bbox: { x: number; y: number; w: number; h: number };
+            };
+            const el = document.querySelector<HTMLElement>('.feder-page')!;
+            const rect = el.getBoundingClientRect();
+            const k = rect.width / Number(el.dataset.w);
+            resolve({
+              x: rect.left + (link.bbox.x + link.bbox.w / 2) * k,
+              y: rect.top + (link.bbox.y + link.bbox.h / 2) * k,
+            });
+            req.result.close();
+          };
+        };
+      }),
+  );
+  await fingerTap(page, target.x, target.y);
   await expect(page.locator('.pager')).toHaveText('2 / 2');
 });
