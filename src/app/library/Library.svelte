@@ -8,6 +8,12 @@
   import NewNotebookDialog from './NewNotebookDialog.svelte';
   import MoveDialog from './MoveDialog.svelte';
   import CoverDialog from './CoverDialog.svelte';
+  import ExportDialog from '../components/ExportDialog.svelte';
+  import { importFiles, isFederFile } from './importFiles';
+  import { isPdfFile } from '../../pdf/import';
+  import { lastBackupAt } from '../../io/backup';
+  import { ui } from '../stores/ui.svelte';
+  import { onMount } from 'svelte';
   import { press } from './press';
   import { router, type Route } from '../stores/router.svelte';
   import { settings } from '../stores/settings.svelte';
@@ -37,6 +43,7 @@
     | { kind: 'rename-notebook'; notebook: Notebook }
     | { kind: 'move'; sel: lib.Selection }
     | { kind: 'cover'; notebook: Notebook }
+    | { kind: 'export'; notebook: Notebook }
     | { kind: 'confirm-delete'; sel: lib.Selection }
     | { kind: 'confirm-empty' }
     | null
@@ -322,6 +329,11 @@
                 icon: 'notebook',
                 run: () => (dialog = { kind: 'cover', notebook: n }),
               },
+              {
+                label: 'Exportieren …',
+                icon: 'share',
+                run: () => (dialog = { kind: 'export', notebook: n }),
+              },
               { label: 'Duplizieren', icon: 'copy', run: () => void duplicate(sel) },
               { label: 'Verschieben …', icon: 'folder-move', run: () => (dialog = { kind: 'move', sel }) },
               { label: 'In den Papierkorb', icon: 'trash', danger: true, run: () => void trash(sel) },
@@ -355,9 +367,77 @@
       items: [
         { label: 'Notizbuch', icon: 'notebook', run: () => (dialog = { kind: 'new-notebook' }) },
         { label: 'Ordner', icon: 'folder', run: () => (dialog = { kind: 'new-folder' }) },
+        { label: 'PDF importieren …', icon: 'page', run: () => pdfInput?.click() },
+        { label: 'Feder-Datei importieren …', icon: 'restore', run: () => federInput?.click() },
       ],
     };
   }
+
+  // ---------- Import ----------
+
+  let pdfInput = $state<HTMLInputElement>();
+  let federInput = $state<HTMLInputElement>();
+  let dropping = $state(false);
+
+  async function runImport(files: File[]) {
+    if (!files.length) return;
+    const created = await importFiles(files, section === 'docs' ? folderId : null);
+    if (created.length === 1) router.go({ name: 'notebook', id: created[0]!.id });
+  }
+
+  function onPick(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    void runImport(files);
+  }
+
+  function hasFiles(e: DragEvent) {
+    return [...(e.dataTransfer?.types ?? [])].includes('Files');
+  }
+
+  function onDragOver(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropping = true;
+  }
+
+  function onDrop(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropping = false;
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => isPdfFile(f) || isFederFile(f));
+    if (!files.length) toasts.show('Hier lassen sich PDFs und Feder-Dateien ablegen.');
+    void runImport(files);
+  }
+
+  // ---------- Backup-Erinnerung ----------
+
+  onMount(() => {
+    const days = settings.value.backupReminderDays;
+    if (!days || sessionStorage.getItem('feder-backup-nag')) return;
+    void (async () => {
+      const last = await lastBackupAt();
+      const all = await db.notebooks.filter((n) => !n.deletedAt).toArray();
+      if (!all.length) return;
+      const oldest = Math.min(...all.map((n) => n.createdAt));
+      const since = last ?? oldest;
+      const age = (Date.now() - since) / 86_400_000;
+      if (age < days) return;
+      try {
+        sessionStorage.setItem('feder-backup-nag', '1');
+      } catch {
+        /* privater Modus */
+      }
+      toasts.show(
+        last ? `Dein letztes Backup ist ${Math.floor(age)} Tage alt.` : 'Du hast noch kein Backup erstellt.',
+        {
+          sticky: true,
+          action: { label: 'Jetzt sichern', run: () => ui.openSettings('backup') },
+        },
+      );
+    })();
+  });
 
   // ---------- Ziehen & Ablegen ----------
 
@@ -432,7 +512,17 @@
 
 <svelte:window {onkeydown} />
 
-<div class="library">
+<div
+  class="library"
+  class:dropping
+  role="region"
+  aria-label="Bibliothek"
+  ondragover={onDragOver}
+  ondragleave={() => (dropping = false)}
+  ondrop={onDrop}
+>
+  <input bind:this={pdfInput} type="file" accept="application/pdf,.pdf" multiple hidden onchange={onPick} />
+  <input bind:this={federInput} type="file" multiple hidden onchange={onPick} />
   <nav class="tabs" aria-label="Bereiche">
     {#each tabs as t (t.id)}
       <button
@@ -668,6 +758,8 @@
     onclose={() => (dialog = null)}
     onpick={(target) => void moveTo(sel, target).then(endSelecting)}
   />
+{:else if dialog?.kind === 'export'}
+  <ExportDialog notebook={dialog.notebook} onclose={() => (dialog = null)} />
 {:else if dialog?.kind === 'cover'}
   <CoverDialog notebook={dialog.notebook} onclose={() => (dialog = null)} />
 {:else if dialog?.kind === 'confirm-delete'}
@@ -693,10 +785,25 @@
 
 <style>
   .library {
+    position: relative;
     height: 100%;
     display: flex;
     flex-direction: column;
     padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  }
+  .library.dropping::after {
+    content: 'PDF oder Feder-Datei hier ablegen';
+    position: absolute;
+    inset: 12px;
+    display: grid;
+    place-items: center;
+    border: 2px dashed var(--accent);
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--accent-soft) 85%, transparent);
+    color: var(--accent);
+    font: 600 18px var(--font-ui);
+    pointer-events: none;
+    z-index: 40;
   }
   .tabs {
     display: flex;

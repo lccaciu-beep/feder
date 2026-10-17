@@ -40,7 +40,7 @@
       if (!page) return;
       const v = p.version;
       const items = await doc.ensureItems(p.pageId);
-      renderThumbnail(node, page.paper, items, THUMB_W);
+      await renderThumbnail(node, page.paper, items, THUMB_W);
       drawn = v;
     };
     const io = new IntersectionObserver((entries) => {

@@ -17,10 +17,13 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "icons": "node scripts/gen-icons.mjs",
-    "ci": "npm run check && npm run lint && npm run test && npm run build && npm run test:e2e"
+    "ci": "npm run check && npm run lint && npm run test && npm run build && npm run test:e2e",
+    "postinstall": "node scripts/copy-pdfjs.mjs"
   },
   "dependencies": {
     "dexie": "4.4.6",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.4.299",
     "perfect-freehand": "1.2.3",
     "svelte": "5.57.2",
     "workbox-window": "7.4.1"

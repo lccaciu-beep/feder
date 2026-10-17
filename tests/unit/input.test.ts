@@ -3,7 +3,7 @@ import { PressureDetector, classify } from '../../src/engine/input/pressure';
 import { StrokeBuilder, tiltToAngles } from '../../src/engine/ink/capture';
 import { TouchGestures } from '../../src/engine/input/gestures';
 import { Camera, layoutPages } from '../../src/engine/view/camera';
-import { chooseLevel, MAX_CANVAS_PIXELS } from '../../src/engine/render/PageView';
+import { chooseLevel, MAX_CANVAS_PIXELS } from '../../src/engine/render/levels';
 
 describe('Druck-Erkennung', () => {
   it('erkennt echten Druck an variierenden Werten', () => {

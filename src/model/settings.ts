@@ -50,6 +50,8 @@ export interface AppSettings {
   palette: string[];
   librarySort: LibrarySort;
   libraryView: LibraryView;
+  /** Erinnerung, wenn das letzte Backup älter ist (Tage, 0 = aus). */
+  backupReminderDays: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   eraser: { mode: 'stroke', size: 14, sizes: [7, 14, 28], highlighterOnly: false },
   librarySort: 'updated',
   libraryView: 'grid',
+  backupReminderDays: 7,
   palette: [
     '#000000',
     '#5b6270',

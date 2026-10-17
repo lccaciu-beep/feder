@@ -1,6 +1,6 @@
 # Feder – Umsetzungsplan
 
-Stand: 17.10.2026 · Status: **Phase 1 abgeschlossen**, Phase 2 als Nächstes
+Stand: 17.10.2026 · Status: **Phase 1 abgeschlossen**, aus Phase 3 vorgezogen: PDF-Import/-Export und Backup
 
 > Bestätigt am 17.10.2026: E1 Svelte 5 · E2 alle Pakete aus §9 · E3 mkcert ·
 > E4 öffentliches Repo `feder` mit GitHub Pages. E5–E7 gelten als Empfehlung, solange du nicht widersprichst.
@@ -442,15 +442,16 @@ iPad-Prüfliste an dich.
 - [ ] Tests: Lasso-Hit-Test, Transformationen, Formerkennung, Command-Roundtrips
 
 ### Phase 3 – PDF & Daten
-- [ ] PDF-Import (Datei + Drag & Drop) → OPFS, Seiten als `pdf`-Vorlage
-- [ ] pdf.js im Worker, Kachel-Rendering, Text-Layer für Suche, Link-Annotationen klickbar
-- [ ] Große PDFs (500+ Seiten): lazy laden, Miniaturen gedrosselt
+- [x] PDF-Import (Datei + Drag & Drop) → OPFS, Seiten als `pdf`-Vorlage; PDF in bestehendes Notizbuch einfügen (vorgezogen)
+- [x] pdf.js im Worker, scharfes Ausschnitt-Rendering beim Zoomen, Offline-Zusatzdateien (CMaps, Schriften, WASM)
+- [ ] Text-Layer für die Suche, Link-Annotationen klickbar
+- [ ] Große PDFs (500+ Seiten): auf dem iPad messen, ggf. Seitengrößen lazy ermitteln
 - [ ] Eigene Vorlagen aus PDF/Bild
 - [ ] Kamera-Scan: Foto (`capture`), Ecken setzen, Homographie-Entzerrung (eigene Implementierung), Kontrast-Filter
-- [ ] Export PDF (mit/ohne Vorlage; Striche als Vektorpfade via pdf-lib), PNG/JPEG pro Seite, `.feder`-Notizbuch
-- [ ] Teilen über Web Share API (Dateien), Fallback Download
-- [ ] Vollbackup + Restore (ersetzen/zusammenführen), Backup-Erinnerung (X Tage)
-- [ ] Tests: ZIP, Backup-Roundtrip, PDF-Export-Roundtrip, Migration beim Import
+- [x] Export PDF (mit/ohne Vorlage; Striche als Vektorpfade via pdf-lib, Drehung importierter Seiten berücksichtigt), PNG pro Seite, `.feder`-Notizbuch (vorgezogen)
+- [x] Teilen über Web Share API (Dateien), Fallback Download (vorgezogen)
+- [x] Vollbackup + Restore (ersetzt alles; Notizbuch-Dateien werden immer als Kopie importiert), Backup-Erinnerung (einstellbar) (vorgezogen)
+- [x] Tests: ZIP, Backup-Roundtrip, PDF-Export, Drehungs-Matrizen, Blob-Aufräumen; E2E: PDF-Import→Beschriften→Export, Backup→Restore
 
 ### Phase 4 – Suche & Struktur
 - [ ] Suchindex: PDF-Text, Textboxen, Titel, Tags, Lesezeichen; normalisiert (Umlaute/ß)
@@ -491,6 +492,7 @@ iPad-Prüfliste an dich.
 | `fake-indexeddb` | dev | IndexedDB in Vitest |
 | `@types/node` | dev | Typen für `vite.config.ts` |
 | `workbox-window` | dep | Peer-Abhängigkeit von vite-plugin-pwa (Update-Hinweis) |
+| `pdfjs-dist` 6.4, `pdf-lib` 1.17 | dep | laut Spezifikation (PDF-Darstellung bzw. -Export) |
 | `jsdom` | dev | DOM-Umgebung für Vitest |
 | `eslint`, `typescript-eslint`, `eslint-plugin-svelte`, `prettier`, `prettier-plugin-svelte` | dev | Codequalität (optional, kann auch weg) |
 
@@ -509,4 +511,7 @@ Keine Laufzeitabhängigkeiten über die Vorgaben hinaus.
 | 17.10.2026 | Canvas-Obergrenze 8 MP pro Seite; darüber zeigt ein Detail-Canvas nur den sichtbaren Ausschnitt scharf |
 | 17.10.2026 | IDB-Fallback speichert ArrayBuffer statt Blob (Safari-Blob-Probleme in IndexedDB) |
 | 17.10.2026 | Simulierter Druck wird beim Schreiben berechnet und gespeichert → Striche sehen beim Neuzeichnen immer gleich aus |
+| 17.10.2026 | Auf Wunsch vorgezogen: PDF-Import/Annotation, PDF-/Bild-/Feder-Export, Teilen, Vollbackup (Teile von Phase 3) |
+| 17.10.2026 | Wiederherstellen eines Vollbackups ersetzt alles (kein Zusammenführen, damit nichts unbemerkt überschrieben wird) |
+| 17.10.2026 | Teilen in zwei Schritten („Datei erstellen“ → „Teilen oder sichern“), weil Safari navigator.share nur direkt nach einem Tipp erlaubt |
 | 17.10.2026 | Design: Löschblatt-Blaugrau, Tinte Blauschwarz, Akzent Königsblau, Schrift Avenir Next (auf dem iPad vorhanden, offline) |

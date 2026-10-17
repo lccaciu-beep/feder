@@ -46,6 +46,9 @@
     scroll: '<path d="M12 4v16M8.5 7.5L12 4l3.5 3.5M8.5 16.5L12 20l3.5-3.5"/>',
     'scroll-h': '<path d="M4 12h16M7.5 8.5L4 12l3.5 3.5M16.5 8.5L20 12l-3.5 3.5"/>',
     notebook: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 3.5v17"/>',
+    share:
+      '<path d="M12 15V3.5M8 7.5l4-4 4 4"/><path d="M7.5 11H6a2 2 0 00-2 2v6a2 2 0 002 2h12a2 2 0 002-2v-6a2 2 0 00-2-2h-1.5"/>',
+    download: '<path d="M12 4v11.5M8 11.5l4 4 4-4"/><path d="M5 20h14"/>',
     straight:
       '<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="1.6" fill="currentColor" stroke="none"/>',
   };

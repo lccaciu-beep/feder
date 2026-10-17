@@ -5,6 +5,8 @@
   import ToolOptions from './ToolOptions.svelte';
   import Sidebar from './Sidebar.svelte';
   import PaperDialog from './PaperDialog.svelte';
+  import ExportDialog from '../components/ExportDialog.svelte';
+  import { insertPdfPages } from '../../pdf/import';
   import { Editor, type EditorState, type ToolId } from '../../engine/Editor';
   import { NotebookDoc } from '../../engine/doc/NotebookDoc';
   import { getDb } from '../../storage/db';
@@ -27,6 +29,28 @@
   let showSidebar = $state(false);
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   let paperFor = $state<Id | null>(null);
+  let showExport = $state(false);
+  let pdfInput = $state<HTMLInputElement>();
+
+  async function onPdfPicked(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || !doc || !editor) return;
+    const busy = toasts.show(`Füge „${file.name}“ ein …`, { sticky: true });
+    try {
+      const index = (st?.pageIndex ?? 0) + 1;
+      const pages = await insertPdfPages(doc, file, index);
+      editor.goToPage(index);
+      toasts.show(`${pages.length} ${pages.length === 1 ? 'Seite' : 'Seiten'} eingefügt`);
+    } catch (err) {
+      toasts.show(`PDF konnte nicht eingefügt werden: ${err instanceof Error ? err.message : String(err)}`, {
+        ms: 6000,
+      });
+    } finally {
+      toasts.dismiss(busy);
+    }
+  }
   let error = $state<string | null>(null);
   let zoomHint = $state<string | null>(null);
   let zoomTimer: ReturnType<typeof setTimeout> | null = null;
@@ -139,6 +163,8 @@
       x: r.right - 240,
       y: r.bottom + 6,
       items: [
+        { label: 'Exportieren …', icon: 'share', run: () => (showExport = true) },
+        { label: 'PDF einfügen …', icon: 'page-plus', run: () => pdfInput?.click() },
         {
           label: 'Vorlage ändern …',
           icon: 'template',
@@ -157,7 +183,12 @@
 
   function applyPaper(pageId: Id, paper: import('../../model/types').PaperSpec, scope: 'page' | 'all') {
     if (!doc) return;
-    doc.setPaper(scope === 'all' ? [...doc.pageIds] : [pageId], paper, scope === 'all');
+    // „Alle Seiten“ lässt importierte PDF-Seiten unangetastet.
+    const ids =
+      scope === 'all'
+        ? doc.pageIds.filter((id) => doc!.pages.get(id)?.paper.template.kind !== 'pdf')
+        : [pageId];
+    doc.setPaper(ids, paper, scope === 'all');
   }
 
   function typing(e: KeyboardEvent) {
@@ -218,6 +249,7 @@
 <svelte:window {onkeydown} />
 
 <div class="editor-shell">
+  <input bind:this={pdfInput} type="file" accept="application/pdf,.pdf" hidden onchange={onPdfPicked} />
   <div class="canvas-host" bind:this={host}></div>
 
   <div class="bars" bind:this={barEl}>
@@ -313,6 +345,16 @@
 
 {#if menu}
   <Menu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
+
+{#if showExport && doc}
+  {@const pid = doc.pageIds[st?.pageIndex ?? 0] ?? null}
+  <ExportDialog
+    notebook={doc.notebook}
+    currentPageId={pid}
+    currentPageNumber={(st?.pageIndex ?? 0) + 1}
+    onclose={() => (showExport = false)}
+  />
 {/if}
 
 {#if paperFor && doc}

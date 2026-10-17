@@ -5,8 +5,8 @@
   import Toasts from './components/Toasts.svelte';
   import { router } from './stores/router.svelte';
   import { settings } from './stores/settings.svelte';
+  import { ui } from './stores/ui.svelte';
 
-  let showSettings = $state(false);
   let systemDark = $state(window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   $effect(() => {
@@ -25,18 +25,14 @@
 
 {#if router.route.name === 'notebook'}
   {#key router.route.id}
-    <EditorView
-      id={router.route.id}
-      initialPage={router.route.page}
-      onsettings={() => (showSettings = true)}
-    />
+    <EditorView id={router.route.id} initialPage={router.route.page} onsettings={() => ui.openSettings()} />
   {/key}
 {:else}
-  <Library route={router.route} onsettings={() => (showSettings = true)} />
+  <Library route={router.route} onsettings={() => ui.openSettings()} />
 {/if}
 
-{#if showSettings}
-  <SettingsSheet onclose={() => (showSettings = false)} />
+{#if ui.settingsOpen}
+  <SettingsSheet section={ui.settingsSection} onclose={() => ui.closeSettings()} />
 {/if}
 
 <Toasts />

@@ -3,7 +3,7 @@ import svelte from 'eslint-plugin-svelte';
 
 export default tseslint.config(
   {
-    ignores: ['dist/', 'dev-dist/', 'node_modules/', 'playwright-report/', 'test-results/', 'certs/'],
+    ignores: ['dist/', 'dev-dist/', 'node_modules/', 'playwright-report/', 'test-results/', 'certs/', 'public/pdfjs/'],
   },
   ...tseslint.configs.recommended,
   ...svelte.configs.recommended,

@@ -26,6 +26,13 @@ function opKey(op: Op): string {
   return `${op.table}:${op.type === 'put' ? op.value.id : op.key}`;
 }
 
+const instances = new Set<Autosave>();
+
+/** Schreibt alle ausstehenden Änderungen aller offenen Notizbücher (z. B. vor einem Backup). */
+export async function flushAllAutosaves(): Promise<void> {
+  await Promise.all([...instances].map((a) => a.flush()));
+}
+
 export class Autosave {
   private pending = new Map<string, Op>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -41,6 +48,12 @@ export class Autosave {
     opts: Partial<AutosaveOptions> = {},
   ) {
     this.opts = { ...DEFAULTS, ...opts };
+    instances.add(this);
+  }
+
+  /** Abmelden, wenn das Notizbuch geschlossen wird (vorher flush()). */
+  dispose(): void {
+    instances.delete(this);
   }
 
   get size(): number {

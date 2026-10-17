@@ -6,7 +6,103 @@
   import { isStandalone } from '../../platform/safari';
   import type { PressureSetting, ThemeSetting } from '../../model/settings';
 
-  let { onclose }: { onclose: () => void } = $props();
+  import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import { exportBackup, lastBackupAt, readFederFile, restoreBackup, type FederFile } from '../../io/backup';
+  import { shareOrDownload } from '../../io/share';
+  import { toasts } from '../stores/toast.svelte';
+
+  let { onclose, section = null }: { onclose: () => void; section?: string | null } = $props();
+
+  // ---------- Backup ----------
+  let lastBackup = $state<number | null>(null);
+  let backupFile = $state<Blob | null>(null);
+  let backupBusy = $state(false);
+  let restoreInput = $state<HTMLInputElement>();
+  // raw: die Tabellen dürfen nicht in Svelte-Proxys verpackt werden (IndexedDB kann die nicht klonen)
+  let pendingRestore = $state.raw<FederFile | null>(null);
+  let backupEl = $state<HTMLElement>();
+
+  $effect(() => {
+    void lastBackupAt().then((t) => (lastBackup = t));
+  });
+
+  $effect(() => {
+    if (section === 'backup' && backupEl) backupEl.scrollIntoView({ block: 'start' });
+  });
+
+  const backupName = () => `Feder-Backup ${new Date().toISOString().slice(0, 10)}.feder`;
+
+  async function makeBackup() {
+    backupBusy = true;
+    try {
+      backupFile = await exportBackup();
+      lastBackup = await lastBackupAt();
+    } catch (err) {
+      toasts.show(`Backup fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`, { ms: 6000 });
+    } finally {
+      backupBusy = false;
+    }
+  }
+
+  async function shareBackup() {
+    if (!backupFile) return;
+    const r = await shareOrDownload(backupFile, backupName());
+    if (r !== 'cancelled') {
+      backupFile = null;
+      toasts.show(r === 'shared' ? 'Backup weitergegeben' : 'Backup heruntergeladen');
+    }
+  }
+
+  async function pickRestore(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const f = await readFederFile(file);
+      if (f.manifest.kind !== 'backup') {
+        toasts.show('Das ist ein einzelnes Notizbuch. Importiere es in der Bibliothek über „Neu“.', {
+          ms: 6000,
+        });
+        return;
+      }
+      pendingRestore = f;
+    } catch (err) {
+      toasts.show(err instanceof Error ? err.message : String(err), { ms: 6000 });
+    }
+  }
+
+  async function doRestore(f: FederFile) {
+    const busy = toasts.show('Backup wird wiederhergestellt …', { sticky: true });
+    try {
+      await restoreBackup(f);
+      location.hash = '#/';
+      location.reload();
+    } catch (err) {
+      toasts.dismiss(busy);
+      toasts.show(`Wiederherstellen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`, {
+        ms: 8000,
+      });
+    }
+  }
+
+  function fmtDateTime(t: number) {
+    return new Date(t).toLocaleString('de-DE', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  const reminderOptions = [
+    { v: 0, label: 'Aus' },
+    { v: 3, label: '3 Tage' },
+    { v: 7, label: '7 Tage' },
+    { v: 14, label: '14 Tage' },
+    { v: 30, label: '30 Tage' },
+  ];
 
   let info = $state<StorageInfo | null>(null);
   let blobKind = $state<string>('…');
@@ -139,6 +235,45 @@
     </div>
   </section>
 
+  <section bind:this={backupEl}>
+    <h3>Backup</h3>
+    <p class="note">
+      {lastBackup ? `Letztes Backup: ${fmtDateTime(lastBackup)}.` : 'Noch kein Backup erstellt.'}
+      Ein Backup enthält alle Notizbücher, Ordner, PDFs und Einstellungen in einer Datei. Sichere es zum Beispiel
+      in der Dateien-App oder in iCloud Drive.
+    </p>
+    <div class="row">
+      <span>Backup erstellen</span>
+      {#if backupFile}
+        <button class="btn primary" onclick={shareBackup}>Teilen oder sichern</button>
+      {:else}
+        <button class="btn" onclick={makeBackup} disabled={backupBusy}
+          >{backupBusy ? 'Wird erstellt …' : 'Erstellen'}</button
+        >
+      {/if}
+    </div>
+    <div class="row">
+      <span>Backup wiederherstellen<small>Ersetzt alle aktuellen Daten</small></span>
+      <button class="btn" onclick={() => restoreInput?.click()}>Datei wählen …</button>
+      <input bind:this={restoreInput} type="file" hidden onchange={pickRestore} />
+    </div>
+    <div class="row">
+      <span>Erinnern, wenn das letzte Backup älter ist als</span>
+      <select
+        class="field select"
+        value={s.backupReminderDays}
+        onchange={(e) =>
+          settings.update(
+            (v) => (v.backupReminderDays = Number((e.currentTarget as HTMLSelectElement).value)),
+          )}
+      >
+        {#each reminderOptions as o (o.v)}
+          <option value={o.v}>{o.label}</option>
+        {/each}
+      </select>
+    </div>
+  </section>
+
   <section>
     <h3>Speicher</h3>
     <div class="meter" aria-hidden="true"><span style:width="{usedPct}%"></span></div>
@@ -176,7 +311,23 @@
   </section>
 </Sheet>
 
+{#if pendingRestore}
+  {@const f = pendingRestore}
+  <ConfirmDialog
+    title="Backup wiederherstellen?"
+    text={`Das Backup vom ${fmtDateTime(f.manifest.createdAt)} enthält ${f.manifest.counts.notebooks ?? 0} Notizbücher. Alle Daten auf diesem Gerät werden dadurch ersetzt. Erstelle vorher ein aktuelles Backup, wenn du unsicher bist.`}
+    confirm="Ersetzen und wiederherstellen"
+    danger
+    onclose={() => (pendingRestore = null)}
+    onconfirm={() => void doRestore(f)}
+  />
+{/if}
+
 <style>
+  .select {
+    width: auto;
+    min-height: 40px;
+  }
   section + section {
     margin-top: 22px;
     padding-top: 18px;

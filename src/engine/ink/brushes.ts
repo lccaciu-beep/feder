@@ -209,3 +209,44 @@ export function drawItems(ctx: Ctx, items: readonly Item[], filter?: (it: Item) 
 export function isHighlighter(it: Item): boolean {
   return it.type === 'stroke' && it.tool === 'highlighter';
 }
+
+// ---------- SVG-Pfade (für den PDF-Export) ----------
+
+const f = (n: number) => (Math.round(n * 100) / 100).toString();
+
+/** Umriss als SVG-Pfad – dieselbe Glättung wie outlineToPath. */
+export function outlineToSvg(outline: number[][]): string {
+  const n = outline.length;
+  if (n < 2) return '';
+  const parts = [`M${f(outline[0]![0]!)} ${f(outline[0]![1]!)}`];
+  for (let i = 1; i < n; i++) {
+    const a = outline[i]!;
+    const b = outline[(i + 1) % n]!;
+    parts.push(`Q${f(a[0]!)} ${f(a[1]!)} ${f((a[0]! + b[0]!) / 2)} ${f((a[1]! + b[1]!) / 2)}`);
+  }
+  return parts.join('') + 'Z';
+}
+
+/** Mittellinie als SVG-Pfad (gestrichelte/gepunktete Striche). */
+export function centerlineSvg(points: ArrayLike<number>, stride: number): string {
+  const n = Math.floor(points.length / stride);
+  if (!n) return '';
+  const parts = [`M${f(points[0]!)} ${f(points[1]!)}`];
+  if (n === 1) return parts[0] + `L${f(points[0]! + 0.01)} ${f(points[1]!)}`;
+  for (let i = 1; i < n - 1; i++) {
+    const o = i * stride;
+    parts.push(
+      `Q${f(points[o]!)} ${f(points[o + 1]!)} ${f((points[o]! + points[o + stride]!) / 2)} ${f((points[o + 1]! + points[o + stride + 1]!) / 2)}`,
+    );
+  }
+  const lo = (n - 1) * stride;
+  parts.push(`L${f(points[lo]!)} ${f(points[lo + 1]!)}`);
+  return parts.join('');
+}
+
+/** SVG-Pfad eines Strichs: Umriss (gefüllt) oder Mittellinie (gestrichelt). */
+export function strokeSvg(item: StrokeItem): string {
+  return item.dash === 'solid'
+    ? outlineToSvg(getStroke(toFreehandInput(item.points, item), strokeOptions(item, true)))
+    : centerlineSvg(item.points, item.stride);
+}

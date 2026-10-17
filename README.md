@@ -16,9 +16,23 @@ Architektur, Datenformat und Fortschritt stehen in [PLAN.md](PLAN.md).
 
 Unter **Einstellungen → Speicher** siehst du, ob der dauerhafte Speicher aktiv ist.
 
+## Daten sichern und weitergeben
+
+Feder speichert jede Änderung automatisch auf dem iPad. Damit nichts verloren geht:
+
+- **Vollbackup:** Einstellungen → Backup → *Erstellen* → *Teilen oder sichern*, zum Beispiel in der
+  Dateien-App oder in iCloud Drive. Über *Backup wiederherstellen* wird alles aus der Datei zurückgeholt
+  (ersetzt den aktuellen Stand). Eine Erinnerung meldet sich, wenn das letzte Backup zu alt ist.
+- **Einzelnes Notizbuch exportieren:** lange auf das Cover drücken → *Exportieren …* oder im Editor
+  über *⋯ → Exportieren …*. Formate: PDF (mit oder ohne Linien/Raster), Bild der aktuellen Seite,
+  Feder-Datei (bleibt vollständig bearbeitbar).
+- **PDFs bearbeiten:** In der Bibliothek *Neu → PDF importieren …* (oder ein PDF in das Fenster ziehen).
+  Jede PDF-Seite wird zu einer Notizbuch-Seite, auf der du schreiben kannst. Im Editor fügt
+  *⋯ → PDF einfügen …* ein PDF hinter der aktuellen Seite ein.
+
 ## Entwicklung
 
-Voraussetzung: Node.js 24.
+Voraussetzung: Node.js 24. `npm install` kopiert zusätzlich die pdf.js-Dateien nach `public/pdfjs/`.
 
 ```bash
 npm install

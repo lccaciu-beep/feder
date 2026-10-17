@@ -21,9 +21,25 @@
 </script>
 
 <Sheet title="Vorlage ändern" {onclose} wide>
+  {#if paper.template.kind === 'pdf'}
+    <p class="note">
+      Diese Seite stammt aus einem PDF. „Für diese Seite“ ersetzt den PDF-Inhalt durch die gewählte Vorlage,
+      „Für alle Seiten“ ändert nur die eigenen Seiten.
+    </p>
+  {/if}
   <PaperPicker bind:choice />
   {#snippet footer()}
     <button class="btn" onclick={() => apply('all')}>Für alle Seiten</button>
     <button class="btn primary" onclick={() => apply('page')}>Für diese Seite</button>
   {/snippet}
 </Sheet>
+
+<style>
+  .note {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--accent-soft);
+    font: 14px var(--font-ui);
+  }
+</style>

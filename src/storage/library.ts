@@ -6,6 +6,7 @@ import { newId } from '../model/ids';
 import { DEFAULT_PAPER } from '../model/paper';
 import type { CoverSpec, Folder, Id, Item, Notebook, NotebookKind, Page, PaperSpec } from '../model/types';
 import { getDb } from './db';
+import { getBlobStore } from './blobstore';
 
 export interface NewNotebookInput {
   title: string;
@@ -13,6 +14,8 @@ export interface NewNotebookInput {
   cover: CoverSpec;
   paper?: PaperSpec;
   kind?: NotebookKind;
+  /** Papier pro Seite (z. B. beim PDF-Import). Ohne Angabe: eine Seite mit `paper`. */
+  pages?: PaperSpec[];
 }
 
 export function makePage(notebookId: Id, paper: PaperSpec, now = Date.now()): Page {
@@ -83,7 +86,7 @@ export async function createNotebook(input: NewNotebookInput): Promise<Notebook>
   const now = Date.now();
   const paper = input.paper ?? DEFAULT_PAPER;
   const id = newId(now);
-  const first = makePage(id, paper, now);
+  const pages = (input.pages?.length ? input.pages : [paper]).map((p) => makePage(id, p, now));
   const notebook: Notebook = {
     id,
     folderId: input.folderId,
@@ -91,7 +94,7 @@ export async function createNotebook(input: NewNotebookInput): Promise<Notebook>
     kind: input.kind ?? 'paged',
     cover: input.cover,
     favorite: 0,
-    pageIds: [first.id],
+    pageIds: pages.map((p) => p.id),
     defaultPaper: structuredClone(paper),
     createdAt: now,
     updatedAt: now,
@@ -100,7 +103,7 @@ export async function createNotebook(input: NewNotebookInput): Promise<Notebook>
   };
   await db.transaction('rw', db.notebooks, db.pages, async () => {
     await db.notebooks.add(notebook);
-    await db.pages.add(first);
+    await db.pages.bulkAdd(pages);
   });
   return notebook;
 }
@@ -264,8 +267,14 @@ export async function deletePermanently(sel: Selection): Promise<void> {
       .primaryKeys();
     inFolders.forEach((id) => notebookIds.add(id));
   }
+  const nbIds = [...notebookIds];
+  const blobIds = new Set<Id>();
+  if (nbIds.length) {
+    for (const p of await db.pages.where('notebookId').anyOf(nbIds).toArray()) {
+      if (p.paper.template.kind === 'pdf') blobIds.add(p.paper.template.blobId);
+    }
+  }
   await db.transaction('rw', [db.folders, db.notebooks, db.pages, db.items], async () => {
-    const nbIds = [...notebookIds];
     if (nbIds.length) {
       await db.items.where('notebookId').anyOf(nbIds).delete();
       await db.pages.where('notebookId').anyOf(nbIds).delete();
@@ -273,6 +282,20 @@ export async function deletePermanently(sel: Selection): Promise<void> {
     }
     await db.folders.bulkDelete([...folderIds]);
   });
+  await deleteUnusedBlobs(blobIds);
+}
+
+/** Löscht Dateien (PDFs), auf die keine Seite mehr verweist. */
+export async function deleteUnusedBlobs(candidates: Iterable<Id>): Promise<void> {
+  const ids = new Set(candidates);
+  if (!ids.size) return;
+  const db = getDb();
+  await db.pages.each((p) => {
+    if (p.paper.template.kind === 'pdf') ids.delete(p.paper.template.blobId);
+  });
+  if (!ids.size) return;
+  const store = await getBlobStore();
+  for (const id of ids) await store.delete(id);
 }
 
 export async function emptyTrash(): Promise<void> {

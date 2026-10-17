@@ -1,4 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { PDFDocument, rgb } from 'pdf-lib';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 type Pt = [number, number, number?];
 
@@ -229,4 +233,89 @@ test('Offline: App lädt nach Installation des Service Workers ohne Netz', async
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Dokumente' })).toBeVisible();
   await context.setOffline(false);
+});
+
+// ---------- PDF, Export und Backup ----------
+
+async function fixturePdf(): Promise<string> {
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < 2; i++) {
+    const p = doc.addPage([420, 595]);
+    p.drawRectangle({ x: 40, y: 400, width: 340, height: 150, color: rgb(0.1, 0.3, 0.8) });
+    p.drawText(`Vorlesung Seite ${i + 1}`, { x: 50, y: 360, size: 22 });
+  }
+  const file = path.join(os.tmpdir(), `feder-test-${Date.now()}.pdf`);
+  fs.writeFileSync(file, await doc.save());
+  return file;
+}
+
+/** Anteil nicht-weißer Pixel im Hintergrund-Canvas der ersten Seite. */
+async function bgColored(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('.feder-bg')!;
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i]! < 200 || d[i + 1]! < 200) n++;
+    return n / (d.length / 4);
+  });
+}
+
+test('PDF importieren, beschriften und als PDF exportieren', async ({ page }) => {
+  const pdf = await fixturePdf();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Neu', exact: true }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: 'PDF importieren …' }).click();
+  await (await chooser).setFiles(pdf);
+
+  await expect(page.locator('.title')).toHaveText(/feder-test-/);
+  await expect(page.locator('.pager')).toHaveText('1 / 2');
+  // das blaue Rechteck aus dem PDF muss im Hintergrund erscheinen
+  await expect.poll(() => bgColored(page), { timeout: 10_000 }).toBeGreaterThan(0.05);
+
+  await pen(page, wave(300, 600));
+  await expect.poll(() => storedItems(page)).toBe(1);
+
+  await page.getByRole('button', { name: 'Weitere Optionen' }).click();
+  await page.getByRole('menuitem', { name: 'Exportieren …' }).click();
+  await page.getByRole('button', { name: 'Datei erstellen' }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Teilen oder sichern' }).click();
+  const file = await (await download).path();
+  const out = await PDFDocument.load(fs.readFileSync(file));
+  expect(out.getPageCount()).toBe(2);
+  expect(out.getPage(0).getSize()).toEqual({ width: 420, height: 595 });
+});
+
+test('Backup erstellen und wiederherstellen', async ({ page }) => {
+  await newNotebook(page, 'Bleibt erhalten');
+  await pen(page, wave(300, 420));
+  await expect.poll(() => storedItems(page)).toBe(1);
+  await page.getByRole('button', { name: 'Zur Bibliothek' }).click();
+
+  await page.getByRole('button', { name: 'Einstellungen' }).click();
+  await page.getByRole('button', { name: 'Erstellen', exact: true }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Teilen oder sichern' }).click();
+  const backup = await (await download).path();
+  const named = path.join(os.tmpdir(), `feder-backup-${Date.now()}.feder`);
+  fs.copyFileSync(backup, named);
+  await page.getByRole('button', { name: 'Schließen' }).click();
+
+  // Nach dem Backup noch etwas ändern
+  await page.getByRole('button', { name: 'Neu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Ordner' }).click();
+  await page.getByRole('textbox', { name: 'Neuer Ordner' }).fill('Nach dem Backup');
+  await page.getByRole('button', { name: 'Ordner anlegen' }).click();
+  await expect(page.getByRole('button', { name: 'Ordner Nach dem Backup' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Einstellungen' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Datei wählen …' }).click();
+  await (await chooser).setFiles(named);
+  await page.getByRole('button', { name: 'Ersetzen und wiederherstellen' }).click();
+
+  await expect(page.getByRole('button', { name: 'Notizbuch Bleibt erhalten' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ordner Nach dem Backup' })).toBeHidden();
+  expect(await storedItems(page)).toBe(1);
 });

@@ -236,7 +236,7 @@ export class NotebookDoc {
 
   addPage(index: number, paper?: PaperSpec): Page {
     const ref = this.pageAt(Math.min(index, this.pageIds.length) - 1) ?? this.pageAt(0);
-    const page = makePage(this.id, paper ?? ref?.paper ?? this.notebook.defaultPaper);
+    const page = makePage(this.id, paper ?? blankLike(ref?.paper ?? this.notebook.defaultPaper));
     const ids = [...this.pageIds];
     ids.splice(index, 0, page.id);
     this.execute({
@@ -246,6 +246,18 @@ export class NotebookDoc {
       notebook: this.notebookChange(ids),
     });
     return page;
+  }
+
+  /** Fügt fertige Seiten (z. B. aus einem PDF) als ein Undo-Schritt ein. */
+  insertPages(index: number, pages: Page[], label = 'Seiten einfügen'): void {
+    const ids = [...this.pageIds];
+    ids.splice(Math.max(0, Math.min(index, ids.length)), 0, ...pages.map((p) => p.id));
+    this.execute({
+      label,
+      items: [],
+      pages: pages.map((after) => ({ before: null, after })),
+      notebook: this.notebookChange(ids),
+    });
   }
 
   async duplicatePage(pageId: Id): Promise<Page | null> {
@@ -316,4 +328,10 @@ function insertSorted(list: Item[], item: Item) {
 function removeById(list: Item[], id: Id) {
   const i = list.findIndex((it) => it.id === id);
   if (i >= 0) list.splice(i, 1);
+}
+
+/** Neue Seiten nach einer PDF-Seite bekommen leeres Papier gleicher Größe. */
+function blankLike(paper: PaperSpec): PaperSpec {
+  if (paper.template.kind === 'builtin') return paper;
+  return { ...paper, color: 'white', template: { kind: 'builtin', id: 'blank', params: {} } };
 }

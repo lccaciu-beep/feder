@@ -267,7 +267,8 @@ export class Editor implements ToolHost {
     this.world.remove();
     this.debugEl?.remove();
     this.root.classList.remove('feder-editor');
-    void this.doc.autosave.flush();
+    const save = this.doc.autosave;
+    void save.flush().finally(() => save.dispose());
   }
 
   // ---------- ToolHost ----------
