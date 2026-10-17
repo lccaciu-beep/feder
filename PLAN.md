@@ -1,6 +1,6 @@
 # Feder – Umsetzungsplan
 
-Stand: 17.10.2026 · Status: **Phasen 1–5 abgeschlossen**
+Stand: 17.10.2026 · Status: **Phasen 1–6 umgesetzt**; offen: Messungen auf dem iPad, Entscheidung Handschrifterkennung
 
 > Bestätigt am 17.10.2026: E1 Svelte 5 · E2 alle Pakete aus §9 · E3 mkcert ·
 > E4 öffentliches Repo `feder` mit GitHub Pages. E5–E7 gelten als Empfehlung, solange du nicht widersprichst.
@@ -473,12 +473,12 @@ iPad-Prüfliste an dich.
 - [x] Lernkarten aus Lasso-Auswahl (Vorderseite = Bild, Rückseite = Text/Scribble), Stapel pro Notizbuch, Lernmodus (Leitner, 5 Fächer), Karten/Stapel verwalten
 - [x] Tests: Leitner-Logik, Audio-Zuordnung; E2E: Lesemodus, Whiteboard-Wachstum, Tabs, Lernkarte
 
-### Phase 6 – Feinschliff
-- [ ] Einstellungen komplett (Eingabe, Druckmodus, Gesten, Darstellung, Speicher, Backup)
-- [ ] App-Sperre per Code (PBKDF2-Hash lokal, Sichtschutz, Sperre bei Hintergrund)
-- [ ] Performance-Pass auf dem A16 (Profiling-Overlay, Speicher, Kaltstart)
-- [ ] Barrierefreiheit: Labels, Fokus-Reihenfolge, Kontrast, Reduced Motion, Dynamic Type
-- [ ] README mit Installationsanleitung („Zum Home-Bildschirm“), mkcert-Anleitung, Backup-Hinweise
+### Phase 6 – Feinschliff ✅ (bis auf Messungen auf dem Gerät)
+- [x] Einstellungen komplett: Eingabe (Druckmodus, Empfindlichkeit, Finger), Gesten, Formen/Kreis-Auswahl/Zickzack, Darstellung, Backup + Erinnerung, Speicher, App-Sperre, Diagnose
+- [x] App-Sperre per Zahlencode (PBKDF2-Hash, sofort oder nach 1/5/15 Minuten im Hintergrund, Sperre nach 5 Fehlversuchen für 30 s); ausdrücklich nur Sichtschutz
+- [x] Barrierefreiheit: Beschriftungen für alle Schaltflächen, Fokus-Rahmen, Tastaturbedienung, reduzierte Bewegung (auch Kamera-Animationen), Zeichenfläche als „application“
+- [ ] Performance-Pass auf dem A16: Leistungsanzeige (Einstellungen → Diagnose) ist vorhanden – Messwerte vom Gerät fehlen noch
+- [x] README mit Installationsanleitung, Bedienung, Datensicherung, Entwicklung
 
 ---
 

@@ -168,6 +168,9 @@ export class Editor implements ToolHost {
     this.whiteboard = doc.notebook.kind === 'whiteboard';
     this.camera.whiteboard = this.whiteboard;
     root.classList.add('feder-editor');
+    root.setAttribute('role', 'application');
+    root.setAttribute('aria-label', 'Zeichenfläche');
+    root.setAttribute('aria-roledescription', 'Notizbuchseite');
     this.world = document.createElement('div');
     this.world.className = 'feder-world';
     root.appendChild(this.world);
@@ -785,6 +788,12 @@ export class Editor implements ToolHost {
 
   private animateTo(to: CameraState, ms = 280) {
     this.inertia = null;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      this.anim = null;
+      this.camera.restore(to);
+      this.invalidateCamera();
+      return;
+    }
     this.anim = { from: this.camera.snapshot(), to, start: performance.now(), ms };
     this.requestFrame();
   }

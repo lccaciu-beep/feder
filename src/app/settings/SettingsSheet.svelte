@@ -7,6 +7,7 @@
   import type { PressureSetting, ThemeSetting } from '../../model/settings';
 
   import ConfirmDialog from '../components/ConfirmDialog.svelte';
+  import LockSettings from './LockSettings.svelte';
   import { exportBackup, lastBackupAt, readFederFile, restoreBackup, type FederFile } from '../../io/backup';
   import { shareOrDownload } from '../../io/share';
   import { toasts } from '../stores/toast.svelte';
@@ -183,7 +184,7 @@
       />
     </label>
     <label class="row">
-      <span>Zeichnen und halten zieht eine gerade Linie</span>
+      <span>Zeichnen und halten erkennt Linien und Formen</span>
       <input
         type="checkbox"
         checked={s.holdToStraighten}
@@ -196,6 +197,17 @@
         type="checkbox"
         checked={s.zigzagErase}
         onchange={() => settings.update((v) => (v.zigzagErase = !v.zigzagErase))}
+      />
+    </label>
+    <label class="row">
+      <span
+        >Kreis um Inhalte bietet Auswahl an<small>Nach einem Kreis mit dem Stift erscheint „Auswählen“</small
+        ></span
+      >
+      <input
+        type="checkbox"
+        checked={s.circleToLasso}
+        onchange={() => settings.update((v) => (v.circleToLasso = !v.circleToLasso))}
       />
     </label>
     <label class="row">
@@ -295,6 +307,11 @@
         <button class="btn" onclick={askPersist}>Anfragen</button>
       {/if}
     </div>
+  </section>
+
+  <section>
+    <h3>App-Sperre</h3>
+    <LockSettings />
   </section>
 
   <section>

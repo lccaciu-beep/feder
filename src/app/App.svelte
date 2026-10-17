@@ -6,6 +6,32 @@
   import { router } from './stores/router.svelte';
   import { settings } from './stores/settings.svelte';
   import { ui } from './stores/ui.svelte';
+  import LockScreen from './components/LockScreen.svelte';
+  import { getLock, type LockConfig } from '../storage/lock';
+
+  // App-Sperre: beim Start und nach Rückkehr aus dem Hintergrund
+  let lockCfg = $state.raw<LockConfig | null>(null);
+  let locked = $state(false);
+  let hiddenAt = 0;
+
+  $effect(() => {
+    void getLock().then((cfg) => {
+      lockCfg = cfg;
+      locked = !!cfg;
+    });
+    const onVis = async () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        lockCfg = await getLock();
+        // Sofort-Sperre: Inhalt verdecken, bevor iOS das Vorschaubild macht
+        if (lockCfg && lockCfg.delayMin === 0) locked = true;
+      } else if (lockCfg && Date.now() - hiddenAt >= lockCfg.delayMin * 60_000) {
+        locked = true;
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  });
 
   let systemDark = $state(window.matchMedia('(prefers-color-scheme: dark)').matches);
 
@@ -41,3 +67,7 @@
 {/if}
 
 <Toasts />
+
+{#if locked && lockCfg}
+  <LockScreen config={lockCfg} onunlock={() => (locked = false)} />
+{/if}
